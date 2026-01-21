@@ -1,3 +1,7 @@
+// Force all pages to be dynamically rendered to avoid Supabase client initialization failures during build
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 import { ThemeProvider } from '@/components/home/theme-provider';
 import { siteMetadata } from '@/lib/site-metadata';
 import type { Metadata, Viewport } from 'next';
