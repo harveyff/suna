@@ -35,6 +35,10 @@ const getBackendUrl = (): string => {
 const nextConfig = (): NextConfig => ({
   output: (process.env.NEXT_OUTPUT as 'standalone') || undefined,
   
+  // Force all pages to be dynamically rendered to avoid Supabase client initialization failures during build
+  // This prevents static generation which would try to initialize Supabase client at build time
+  generateBuildId: async () => 'build-' + Date.now(),
+  
   // Transpile shared package
   transpilePackages: ['@agentpress/shared'],
   
