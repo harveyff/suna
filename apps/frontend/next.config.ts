@@ -43,8 +43,13 @@ const nextConfig = (): NextConfig => ({
   transpilePackages: ['@agentpress/shared'],
   
   // Set environment variables
+  // Note: NEXT_PUBLIC_* variables are injected at build time
+  // For runtime configuration, use environment variables set in the container
   env: {
     NEXT_PUBLIC_BACKEND_URL: getBackendUrl(),
+    // These will be overridden by runtime environment variables if set
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
   },
   
   // Webpack configuration to make Konva work with Next.js

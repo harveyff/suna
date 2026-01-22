@@ -118,6 +118,88 @@ export default function RootLayout({
         <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
         <link rel="dns-prefetch" href="https://eu.i.posthog.com" />
         
+        {/* Runtime Supabase Configuration Injection - MUST be first script */}
+        {/* This injects runtime environment variables into window object for client-side access */}
+        {/* Using IIFE and Object.defineProperty for immutability and early execution */}
+        <script
+          id="supabase-config-injector"
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                'use strict';
+                try {
+                  // Read runtime environment variables (available in Next.js standalone mode)
+                  var supabaseUrl = ${JSON.stringify(process.env.NEXT_PUBLIC_SUPABASE_URL || '')};
+                  var supabaseKey = ${JSON.stringify(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '')};
+                  
+                  // If URL is relative (starts with /), build full URL from current origin
+                  if (supabaseUrl && supabaseUrl.startsWith('/')) {
+                    if (typeof window !== 'undefined' && window.location) {
+                      supabaseUrl = window.location.origin + supabaseUrl;
+                    }
+                  }
+                  
+                  // Fallback: if URL is empty or invalid, use current origin + /supabase
+                  if (!supabaseUrl || supabaseUrl.trim() === '' || supabaseUrl.includes('placeholder')) {
+                    if (typeof window !== 'undefined' && window.location) {
+                      supabaseUrl = window.location.origin + '/supabase';
+                    } else {
+                      supabaseUrl = 'https://demo.supabase.co';
+                    }
+                  }
+                  
+                  // Fallback: if key is empty, use demo key
+                  if (!supabaseKey || supabaseKey.trim() === '') {
+                    supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
+                  }
+                  
+                  // Create config object with validation
+                  var config = {
+                    url: supabaseUrl,
+                    anonKey: supabaseKey,
+                    initialized: true,
+                    timestamp: Date.now()
+                  };
+                  
+                  // Use Object.defineProperty to make config immutable and ensure it's set before any other scripts
+                  if (typeof window !== 'undefined') {
+                    Object.defineProperty(window, '__SUPABASE_CONFIG__', {
+                      value: config,
+                      writable: false,
+                      configurable: false,
+                      enumerable: true
+                    });
+                    
+                    // Also set as data attribute on document for additional access method
+                    if (typeof document !== 'undefined') {
+                      document.documentElement.setAttribute('data-supabase-url', supabaseUrl);
+                      document.documentElement.setAttribute('data-supabase-key', supabaseKey);
+                    }
+                  }
+                } catch (error) {
+                  console.error('[Supabase Config] Failed to inject configuration:', error);
+                  // Set fallback config even on error
+                  if (typeof window !== 'undefined') {
+                    Object.defineProperty(window, '__SUPABASE_CONFIG__', {
+                      value: {
+                        url: typeof window !== 'undefined' && window.location 
+                          ? window.location.origin + '/supabase' 
+                          : 'https://demo.supabase.co',
+                        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0',
+                        initialized: false,
+                        error: error.message
+                      },
+                      writable: false,
+                      configurable: false,
+                      enumerable: true
+                    });
+                  }
+                }
+              })();
+            `,
+          }}
+        />
+        
         {/* Container Load - Initialize dataLayer with page context BEFORE GTM loads */}
         <script
           dangerouslySetInnerHTML={{
