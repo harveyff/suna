@@ -43,10 +43,21 @@ COPY --from=deps /app /app
 # Build the frontend app from its workspace location.
 WORKDIR /app/apps/frontend
 
-# Next.js collects completely anonymous telemetry data about general usage.
-# Learn more here: https://nextjs.org/telemetry
+# Declare build arguments for Next.js public environment variables
+# These are injected at build time into the client-side code
+ARG NEXT_PUBLIC_BACKEND_URL
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ARG NEXT_PUBLIC_ENV_MODE
+
+# Set environment variables for Next.js build
+# These will be available during `pnpm run build` and injected into client code
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_OUTPUT=standalone
+ENV NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
+ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+ENV NEXT_PUBLIC_ENV_MODE=${NEXT_PUBLIC_ENV_MODE}
 
 RUN corepack enable pnpm && pnpm run build
 
