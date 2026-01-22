@@ -3,10 +3,18 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 export async function createClient() {
-  let supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  let supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  let supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim()
+  let supabaseKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim()
 
-  // During build time, if environment variables are not set or are placeholders,
+  // Handle relative URLs (e.g., /supabase)
+  // In server components, we can't access window.location, so we need to use a fallback
+  if (supabaseUrl && supabaseUrl.startsWith('/')) {
+    // For server-side rendering, we'll use a placeholder that will be replaced at runtime
+    // The actual URL will be constructed by the client-side code
+    supabaseUrl = 'https://placeholder.supabase.co'
+  }
+
+  // During build time or runtime, if environment variables are not set or are placeholders,
   // use demo values to prevent build failures
   // The actual runtime values will be provided via environment variables or ConfigMap
   if (!supabaseUrl || !supabaseKey || 

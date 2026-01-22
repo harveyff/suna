@@ -173,9 +173,32 @@ export async function middleware(request: NextRequest) {
     request,
   });
 
+  // Get Supabase configuration with fallbacks
+  // In Next.js standalone mode, these are available at runtime via environment variables
+  let supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  let supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  
+  // Handle relative URLs (e.g., /supabase)
+  if (supabaseUrl && supabaseUrl.startsWith('/')) {
+    // In middleware, we can't access window.location, so we need to construct from request
+    const origin = request.nextUrl.origin;
+    supabaseUrl = origin + supabaseUrl;
+  }
+  
+  // Fallback: if URL is empty or invalid, use current origin + /supabase
+  if (!supabaseUrl || supabaseUrl.trim() === '' || supabaseUrl.includes('placeholder')) {
+    const origin = request.nextUrl.origin;
+    supabaseUrl = origin + '/supabase';
+  }
+  
+  // Fallback: if key is empty, use demo key
+  if (!supabaseKey || supabaseKey.trim() === '') {
+    supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseKey,
     {
       cookies: {
         getAll() {
