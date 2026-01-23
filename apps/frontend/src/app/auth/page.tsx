@@ -23,7 +23,6 @@ import { ExampleShowcase } from '@/components/auth/example-showcase';
 import { trackSendAuthLink } from '@/lib/analytics/gtm';
 import { backendApi } from '@/lib/api-client';
 import { createClient } from '@/lib/supabase/client';
-import { createClient } from '@/lib/supabase/client';
 
 // Lazy load heavy components
 const GoogleSignIn = lazy(() => import('@/components/GoogleSignIn'));
