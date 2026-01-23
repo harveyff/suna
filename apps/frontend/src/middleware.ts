@@ -96,11 +96,13 @@ export async function middleware(request: NextRequest) {
   }
   
   // Skip middleware for static files and API routes
+  // Also skip /kong/* paths (Supabase Kong gateway proxy)
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
     pathname.includes('.') ||
-    pathname.startsWith('/api/')
+    pathname.startsWith('/api/') ||
+    pathname.startsWith('/kong/')
   ) {
     return NextResponse.next();
   }
@@ -125,7 +127,7 @@ export async function middleware(request: NextRequest) {
         callbackUrl.searchParams.set(key, value);
       });
       
-      console.log('🔄 Redirecting Supabase verification from root to /auth/callback');
+      console.log('🔄 Redirecting Supabase verification to /auth/callback');
       return NextResponse.redirect(callbackUrl);
     }
   }
@@ -178,17 +180,17 @@ export async function middleware(request: NextRequest) {
   let supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   let supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
   
-  // Handle relative URLs (e.g., /supabase)
+  // Handle relative URLs (e.g., /kong)
   if (supabaseUrl && supabaseUrl.startsWith('/')) {
     // In middleware, we can't access window.location, so we need to construct from request
     const origin = request.nextUrl.origin;
     supabaseUrl = origin + supabaseUrl;
   }
   
-  // Fallback: if URL is empty or invalid, use current origin + /supabase
+  // Fallback: if URL is empty or invalid, use current origin + /kong
   if (!supabaseUrl || supabaseUrl.trim() === '' || supabaseUrl.includes('placeholder')) {
     const origin = request.nextUrl.origin;
-    supabaseUrl = origin + '/supabase';
+    supabaseUrl = origin + '/kong';
   }
   
   // Fallback: if key is empty, use demo key

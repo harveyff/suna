@@ -139,10 +139,10 @@ export default function RootLayout({
                     }
                   }
                   
-                  // Fallback: if URL is empty or invalid, use current origin + /supabase
+                  // Fallback: if URL is empty or invalid, use current origin + /kong
                   if (!supabaseUrl || supabaseUrl.trim() === '' || supabaseUrl.includes('placeholder')) {
                     if (typeof window !== 'undefined' && window.location) {
-                      supabaseUrl = window.location.origin + '/supabase';
+                      supabaseUrl = window.location.origin + '/kong';
                     } else {
                       supabaseUrl = 'https://demo.supabase.co';
                     }
@@ -183,7 +183,7 @@ export default function RootLayout({
                     Object.defineProperty(window, '__SUPABASE_CONFIG__', {
                       value: {
                         url: typeof window !== 'undefined' && window.location 
-                          ? window.location.origin + '/supabase' 
+                          ? window.location.origin + '/kong' 
                           : 'https://demo.supabase.co',
                         anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0',
                         initialized: false,
