@@ -96,15 +96,29 @@ export async function middleware(request: NextRequest) {
   }
   
   // Skip middleware for static files and API routes
-  // Also skip /kong/* paths (Supabase Kong gateway proxy)
+  // Also skip /kong/* paths (Supabase Kong gateway proxy), except /kong/auth/v1/verify which should be handled by frontend
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
     pathname.includes('.') ||
     pathname.startsWith('/api/') ||
-    pathname.startsWith('/kong/')
+    (pathname.startsWith('/kong/') && !pathname.startsWith('/kong/auth/v1/verify'))
   ) {
     return NextResponse.next();
+  }
+  
+  // Handle GoTrue verify endpoint - redirect to /auth/callback
+  if (pathname.startsWith('/kong/auth/v1/verify')) {
+    const searchParams = request.nextUrl.searchParams;
+    const callbackUrl = new URL('/auth/callback', request.url);
+    
+    // Preserve all query parameters
+    searchParams.forEach((value, key) => {
+      callbackUrl.searchParams.set(key, value);
+    });
+    
+    console.log('🔄 Redirecting GoTrue verify endpoint to /auth/callback');
+    return NextResponse.redirect(callbackUrl);
   }
 
   // Handle Supabase verification redirects at root level
@@ -187,10 +201,10 @@ export async function middleware(request: NextRequest) {
     supabaseUrl = origin + supabaseUrl;
   }
   
-  // Fallback: if URL is empty or invalid, use current origin + /kong
+  // Fallback: if URL is empty or invalid, use current origin + /kong/auth/v1
   if (!supabaseUrl || supabaseUrl.trim() === '' || supabaseUrl.includes('placeholder')) {
     const origin = request.nextUrl.origin;
-    supabaseUrl = origin + '/kong';
+    supabaseUrl = origin + '/kong/auth/v1';
   }
   
   // Fallback: if key is empty, use demo key

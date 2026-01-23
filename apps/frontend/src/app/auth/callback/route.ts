@@ -64,13 +64,72 @@ export async function GET(request: NextRequest) {
   // Handle token-based verification (email confirmation, etc.)
   // Supabase sends these to the redirect URL for processing
   if (token && type) {
-    // For token-based flows, redirect to auth page that can handle the verification client-side
-    const verifyUrl = new URL(`${baseUrl}/auth`)
-    verifyUrl.searchParams.set('token', token)
-    verifyUrl.searchParams.set('type', type)
-    if (termsAccepted) verifyUrl.searchParams.set('terms_accepted', 'true')
-    
-    return NextResponse.redirect(verifyUrl)
+    // Verify token server-side using verifyOtp
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        token: token,
+        type: type as 'magiclink' | 'email' | 'recovery' | 'invite',
+        email: email || undefined,
+      });
+
+      if (error) {
+        console.error('❌ Token verification failed:', error);
+        
+        // Check if the error is due to expired/invalid link
+        const isExpiredOrInvalid =
+          error.code === 'otp_expired' ||
+          error.code === 'expired_token' ||
+          error.code === 'token_expired' ||
+          error.message?.toLowerCase().includes('expired') ||
+          error.message?.toLowerCase().includes('invalid');
+
+        if (isExpiredOrInvalid) {
+          // Redirect to auth page with expired state to show resend form
+          const expiredUrl = new URL(`${baseUrl}/auth`);
+          expiredUrl.searchParams.set('expired', 'true');
+          if (email) expiredUrl.searchParams.set('email', email);
+          if (next) expiredUrl.searchParams.set('returnUrl', next);
+          return NextResponse.redirect(expiredUrl);
+        }
+
+        // For other errors, redirect to auth page with error
+        return NextResponse.redirect(`${baseUrl}/auth?error=${encodeURIComponent(error.message)}`);
+      }
+
+      if (data.user) {
+        // Success - determine if new user and redirect
+        const isNewUser = data.user.created_at && Date.now() - new Date(data.user.created_at).getTime() < 60000;
+        const authEvent = isNewUser ? 'signup' : 'login';
+        const authMethod = 'email_magiclink';
+
+        // Handle terms acceptance if needed
+        if (termsAccepted) {
+          const currentMetadata = data.user.user_metadata || {};
+          if (!currentMetadata.terms_accepted_at) {
+            try {
+              await supabase.auth.updateUser({
+                data: {
+                  ...currentMetadata,
+                  terms_accepted_at: new Date().toISOString(),
+                },
+              });
+              console.log('✅ Terms acceptance date saved to user metadata');
+            } catch (updateError) {
+              console.warn('⚠️ Failed to save terms acceptance:', updateError);
+            }
+          }
+        }
+
+        // Redirect to dashboard with auth event params
+        const redirectUrl = new URL(`${baseUrl}${next}`);
+        redirectUrl.searchParams.set('auth_event', authEvent);
+        redirectUrl.searchParams.set('auth_method', authMethod);
+        return NextResponse.redirect(redirectUrl);
+      }
+    } catch (error) {
+      console.error('❌ Unexpected error verifying token:', error);
+      return NextResponse.redirect(`${baseUrl}/auth?error=unexpected_error`);
+    }
   }
 
   // Handle code exchange (OAuth, magic link)

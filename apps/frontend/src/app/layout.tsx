@@ -139,10 +139,10 @@ export default function RootLayout({
                     }
                   }
                   
-                  // Fallback: if URL is empty or invalid, use current origin + /kong
+                  // Fallback: if URL is empty or invalid, use current origin + /kong/auth/v1
                   if (!supabaseUrl || supabaseUrl.trim() === '' || supabaseUrl.includes('placeholder')) {
                     if (typeof window !== 'undefined' && window.location) {
-                      supabaseUrl = window.location.origin + '/kong';
+                      supabaseUrl = window.location.origin + '/kong/auth/v1';
                     } else {
                       supabaseUrl = 'https://demo.supabase.co';
                     }
