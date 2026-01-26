@@ -374,10 +374,36 @@ function LoginContent() {
         }
 
         if (data.user) {
-          console.log('✅ Token verified successfully, redirecting...');
+          console.log('✅ Token verified successfully, syncing cookies and redirecting...');
+          
+          // CRITICAL: After client-side token verification, we need to sync cookies
+          // so that middleware can detect the user. Call an API route to sync session.
+          try {
+            const syncResponse = await fetch('/api/auth/sync-session', {
+              method: 'POST',
+              credentials: 'include', // Important: include cookies
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            });
+            
+            if (!syncResponse.ok) {
+              console.warn('[Auth Page] ⚠️ Failed to sync session cookies, but continuing:', {
+                status: syncResponse.status,
+                statusText: syncResponse.statusText
+              });
+            } else {
+              console.log('[Auth Page] ✅ Session cookies synced successfully');
+            }
+          } catch (syncError) {
+            console.warn('[Auth Page] ⚠️ Error syncing session cookies, but continuing:', syncError);
+          }
+          
           // Success - redirect to dashboard or returnUrl
+          // Use window.location.replace for full page reload to ensure middleware runs
           const finalReturnUrl = returnUrl || '/dashboard';
-          window.location.href = finalReturnUrl;
+          console.log('[Auth Page] 🚀 Redirecting to:', finalReturnUrl);
+          window.location.replace(finalReturnUrl);
         }
       } catch (error: any) {
         console.error('❌ Unexpected error verifying token:', error);
