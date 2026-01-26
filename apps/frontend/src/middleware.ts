@@ -340,10 +340,16 @@ export async function middleware(request: NextRequest) {
     console.log('[Middleware] 🔐 Processing /auth route:', {
       pathname,
       hasUser: !!user,
+      userId: user?.id?.substring(0, 8) + '...',
+      userEmail: user?.email?.substring(0, 20) + '...',
       hasAuthError: !!authError,
+      authErrorType: authError?.name,
+      authErrorMessage: authError?.message,
+      authErrorStatus: (authError as any)?.status,
       reauthParam,
       redirectParam,
-      allSearchParams: Object.fromEntries(request.nextUrl.searchParams.entries())
+      allSearchParams: Object.fromEntries(request.nextUrl.searchParams.entries()),
+      cookies: request.cookies.getAll().map(c => ({ name: c.name, hasValue: !!c.value }))
     });
     
     // If _reauth=true, allow access even if user is authenticated (they need to reauthenticate)
@@ -351,7 +357,7 @@ export async function middleware(request: NextRequest) {
       console.log('[Middleware] ℹ️ Allowing /auth access with _reauth=true flag:', {
         pathname,
         hasUser: !!user,
-        userId: user?.id.substring(0, 8) + '...'
+        userId: user?.id?.substring(0, 8) + '...'
       });
       // Continue to public routes check below
     } else if (user && !authError) {
@@ -364,7 +370,8 @@ export async function middleware(request: NextRequest) {
         currentPath: pathname,
         targetPath,
         redirectParam,
-        willRedirect: targetPath !== pathname
+        willRedirect: targetPath !== pathname,
+        requestUrl: request.url
       });
       
       // Only redirect if target is different from current path
@@ -377,7 +384,8 @@ export async function middleware(request: NextRequest) {
           from: pathname,
           to: targetPath,
           redirectUrl: redirectUrl.toString(),
-          clearedRedirectParam: true
+          clearedRedirectParam: true,
+          userId: user.id.substring(0, 8) + '...'
         });
         
         return NextResponse.redirect(redirectUrl);
@@ -388,11 +396,16 @@ export async function middleware(request: NextRequest) {
         });
       }
     } else {
+      // User is not authenticated or there was an auth error
       console.log('[Middleware] ℹ️ Unauthenticated user on /auth, allowing access:', {
         pathname,
         hasUser: !!user,
+        userId: user?.id?.substring(0, 8) + '...',
         hasAuthError: !!authError,
-        authErrorMessage: authError?.message
+        authErrorType: authError?.name,
+        authErrorMessage: authError?.message,
+        authErrorStatus: (authError as any)?.status,
+        reason: !user ? 'no user' : authError ? 'auth error' : 'unknown'
       });
     }
   }

@@ -63,8 +63,9 @@ function LoginContent() {
   // Extract _reauth parameter to avoid reading searchParams in useEffect
   const needsReauth = searchParams.get('_reauth') === 'true';
 
-  // CRITICAL: Redirect authenticated users immediately - this must run FIRST
-  // Priority: Redirect before any token verification logic
+  // CRITICAL: Middleware handles redirects for authenticated users on /auth
+  // Client-side code should NOT redirect - it should only handle token verification
+  // If middleware doesn't redirect, it means user is not authenticated server-side
   useEffect(() => {
     console.log('[Auth Page] 🔍 useEffect triggered:', {
       isLoading,
@@ -107,195 +108,54 @@ function LoginContent() {
       return;
     }
 
-    // Only redirect if we're not loading and user is authenticated
-    // Skip if we're verifying a token (let token verification handle that)
+    // CRITICAL: Do NOT redirect authenticated users client-side
+    // Middleware handles this at the server edge
+    // If middleware didn't redirect, it means:
+    // 1. User is not authenticated server-side (session expired/invalid)
+    // 2. Or middleware is not working correctly
+    // In either case, client-side redirect would cause a loop
     if (!isLoading && user && !verifyingToken) {
-      // CRITICAL: Set flag immediately to prevent multiple verification attempts
-      redirectAttempted.current = true;
-      
-      console.log('[Auth Page] 🔐 User detected, starting session verification:', {
+      console.log('[Auth Page] ⚠️ User detected client-side but still on /auth page:', {
         userId: user.id?.substring(0, 8) + '...',
         email: user.email?.substring(0, 20) + '...',
-        isLoading,
-        verifyingToken,
-        redirectAttempted: redirectAttempted.current
+        currentPath: window.location.pathname,
+        note: 'Middleware should have redirected. If not, session may be invalid server-side.'
       });
       
-      // CRITICAL: Verify session is actually valid before redirecting
-      // getSession() may return a cached expired session, so we need to verify with getUser()
+      // Verify session to check if it's valid server-side
       const verifySession = async () => {
-        console.log('[Auth Page] 🔍 Starting session verification:', {
-          userId: user.id?.substring(0, 8) + '...',
-          email: user.email?.substring(0, 20) + '...',
-          timestamp: new Date().toISOString()
-        });
-        
         try {
           const supabase = createClient();
-          const verifyStartTime = Date.now();
           const { data: { user: verifiedUser }, error: verifyError } = await supabase.auth.getUser();
-          const verifyDuration = Date.now() - verifyStartTime;
           
-          console.log('[Auth Page] 📡 Session verification result:', {
-            hasVerifiedUser: !!verifiedUser,
-            verifiedUserId: verifiedUser?.id?.substring(0, 8) + '...',
-            verifiedEmail: verifiedUser?.email?.substring(0, 20) + '...',
-            hasError: !!verifyError,
-            errorMessage: verifyError?.message,
-            errorStatus: (verifyError as any)?.status,
-            errorCode: (verifyError as any)?.code,
-            verifyDuration: `${verifyDuration}ms`,
-            originalUserId: user.id?.substring(0, 8) + '...',
-            userIdsMatch: user.id === verifiedUser?.id
-          });
-          
-          // If session is invalid or expired, clear it and show auth form
           if (verifyError || !verifiedUser) {
-            console.warn('[Auth Page] ⚠️ Session invalid or expired, clearing and showing auth form:', {
+            console.warn('[Auth Page] ⚠️ Session invalid server-side, clearing client session:', {
               error: verifyError?.message,
               errorStatus: (verifyError as any)?.status,
-              errorCode: (verifyError as any)?.code,
-              hasOriginalUser: !!user,
-              originalUserId: user.id?.substring(0, 8) + '...',
-              hasVerifiedUser: !!verifiedUser,
-              verifyDuration: `${verifyDuration}ms`
+              hasClientUser: !!user,
+              hasServerUser: !!verifiedUser
             });
-            
             // Clear invalid session
-            console.log('[Auth Page] 🧹 Clearing invalid session...');
             await supabase.auth.signOut();
-            // Reset flags after clearing session
             redirectAttempted.current = false;
             redirectLoopDetected.current = false;
-            console.log('[Auth Page] ✅ Invalid session cleared, showing auth form');
             return;
           }
           
-          // Session is valid, proceed with redirect
-          const finalReturnUrl = returnUrl || '/dashboard';
-          const currentPath = window.location.pathname;
-          
-          console.log('[Auth Page] ✅ Session valid, checking redirect conditions:', {
-            finalReturnUrl,
-            currentPath,
-            returnUrl,
-            verifiedUserId: verifiedUser.id?.substring(0, 8) + '...',
-            verifiedEmail: verifiedUser.email?.substring(0, 20) + '...'
-          });
-          
-          // Don't redirect if we're already on the target page (prevents loops)
-          if (currentPath === finalReturnUrl || currentPath.startsWith(finalReturnUrl + '/')) {
-            console.log('[Auth Page] ℹ️ Already on target page, skipping redirect:', {
-              currentPath,
-              finalReturnUrl,
-              isExactMatch: currentPath === finalReturnUrl,
-              isPrefixMatch: currentPath.startsWith(finalReturnUrl + '/')
-            });
-            redirectAttempted.current = true;
-            return;
-          }
-          
-          // Detect redirect loop: if we're on /auth and we've attempted to redirect before
-          // Check sessionStorage to see if we've attempted this redirect recently
-          if (currentPath === '/auth') {
-            const redirectKey = `redirect_attempt_${finalReturnUrl}`;
-            const lastAttempt = sessionStorage.getItem(redirectKey);
-            const now = Date.now();
-            
-            console.log('[Auth Page] 🔍 Checking for redirect loop:', {
-              redirectKey,
-              lastAttempt,
-              now,
-              timeSinceLastAttempt: lastAttempt ? `${now - parseInt(lastAttempt, 10)}ms` : 'none'
-            });
-            
-            if (lastAttempt) {
-              const timeSinceLastAttempt = now - parseInt(lastAttempt, 10);
-              // If we attempted redirect less than 3 seconds ago, it's likely a loop
-              if (timeSinceLastAttempt < 3000) {
-                console.error('[Auth Page] ❌ Redirect loop detected! Stopping redirect to prevent infinite loop.', {
-                  currentPath,
-                  finalReturnUrl,
-                  returnUrl,
-                  timeSinceLastAttempt: `${timeSinceLastAttempt}ms`,
-                  verifiedUser: !!verifiedUser,
-                  verifiedUserId: verifiedUser?.id?.substring(0, 8) + '...',
-                  redirectKey
-                });
-                redirectLoopDetected.current = true;
-                redirectAttempted.current = true;
-                // Clear the sessionStorage to allow manual navigation
-                sessionStorage.removeItem(redirectKey);
-                console.log('[Auth Page] 🛑 Redirect stopped, showing auth form');
-                // Don't redirect - let the user see the auth page or handle it manually
-                return;
-              } else {
-                console.log('[Auth Page] ℹ️ Previous redirect attempt was long ago, allowing redirect:', {
-                  timeSinceLastAttempt: `${timeSinceLastAttempt}ms`
-                });
-              }
-            }
-            
-            // Record this redirect attempt
-            sessionStorage.setItem(redirectKey, now.toString());
-            console.log('[Auth Page] 📝 Recorded redirect attempt:', {
-              redirectKey,
-              timestamp: now,
-              finalReturnUrl
-            });
-          }
-          
-          // Flag is already set at the start, but ensure it's still true
-          redirectAttempted.current = true;
-          
-          console.log('[Auth Page] ✅ User authenticated with valid session, redirecting to:', {
-            finalReturnUrl,
-            userId: verifiedUser?.id?.substring(0, 8) + '...',
-            email: verifiedUser?.email?.substring(0, 20) + '...',
-            returnUrl,
+          // Session is valid server-side but middleware didn't redirect
+          // This shouldn't happen, but if it does, log it and let middleware handle it
+          console.warn('[Auth Page] ⚠️ Valid session but still on /auth - middleware should redirect:', {
+            userId: verifiedUser.id?.substring(0, 8) + '...',
             currentPath: window.location.pathname,
-            currentSearch: window.location.search,
-            verifyingToken,
-            redirectAttempted: redirectAttempted.current,
-            timestamp: new Date().toISOString()
+            note: 'Waiting for middleware to redirect. Do not redirect client-side to prevent loops.'
           });
-          
-          // Use window.location.replace for a full page navigation that doesn't add to history
-          // This ensures middleware runs fresh and prevents back button issues
-          console.log('[Auth Page] 🚀 Executing redirect:', {
-            from: currentPath,
-            to: finalReturnUrl,
-            method: 'window.location.replace'
-          });
-          window.location.replace(finalReturnUrl);
         } catch (error) {
-          console.error('[Auth Page] ❌ Error verifying session:', {
-            error: error instanceof Error ? error.message : String(error),
-            errorStack: error instanceof Error ? error.stack : undefined,
-            userId: user?.id?.substring(0, 8) + '...',
-            timestamp: new Date().toISOString()
-          });
-          // On error, clear session and show auth form
-          console.log('[Auth Page] 🧹 Clearing session due to error...');
-          try {
-            const supabase = createClient();
-            await supabase.auth.signOut();
-          } catch (signOutError) {
-            console.error('[Auth Page] ❌ Error during signOut:', signOutError);
-          }
-          // Reset flags after error
+          console.error('[Auth Page] ❌ Error verifying session:', error);
           redirectAttempted.current = false;
-          redirectLoopDetected.current = false;
-          console.log('[Auth Page] ✅ Session cleared after error, showing auth form');
         }
       };
       
-      // Verify session before redirecting
-      // Note: redirectAttempted.current is already set above to prevent multiple calls
-      verifySession().catch((error) => {
-        console.error('[Auth Page] ❌ Unhandled error in verifySession:', error);
-        redirectAttempted.current = false;
-      });
+      verifySession();
       return;
     } else if (!isLoading && !user) {
       // Reset redirect attempt flag when user logs out
