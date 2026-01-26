@@ -84,7 +84,7 @@ export default function ActivateTrialPage() {
         router.push('/subscription');
       }
     }
-  }, [trialEnabled, accountState, trialStatus, isLoadingSubscription, isLoadingTrial, router]);
+  }, [isLocalMode, accountState, trialStatus, isLoadingSubscription, isLoadingTrial, router]);
 
   const handleStartTrial = async () => {
     try {
