@@ -244,20 +244,73 @@ export async function middleware(request: NextRequest) {
   let authError: Error | null = null;
   
   const allCookies = request.cookies.getAll()
+  const authCookies = allCookies.filter(c => c.name.includes('auth') || c.name.includes('supabase') || c.name.includes('sb-'))
+  
   console.log('[Middleware] 🔍 Starting auth check:', {
     pathname,
     supabaseUrl: supabaseUrl.substring(0, 50) + '...',
     hasCookies: allCookies.length > 0,
     cookieCount: allCookies.length,
     cookieNames: allCookies.map(c => c.name),
-    authCookieNames: allCookies.filter(c => c.name.includes('auth') || c.name.includes('supabase')).map(c => c.name),
-    cookieValues: allCookies.map(c => ({ name: c.name, valueLength: c.value?.length || 0, valuePrefix: c.value?.substring(0, 20) + '...' || 'empty' }))
+    authCookieCount: authCookies.length,
+    authCookieNames: authCookies.map(c => c.name),
+    cookieDetails: allCookies.map(c => ({ 
+      name: c.name, 
+      valueLength: c.value?.length || 0, 
+      valuePrefix: c.value?.substring(0, 30) + '...' || 'empty',
+      isAuthCookie: c.name.includes('auth') || c.name.includes('supabase') || c.name.includes('sb-')
+    })),
+    requestUrl: request.url,
+    requestMethod: request.method,
+    userAgent: request.headers.get('user-agent')?.substring(0, 50) + '...',
+    referer: request.headers.get('referer'),
+    timestamp: new Date().toISOString()
   });
   
+  // Log if no cookies at all
+  if (allCookies.length === 0) {
+    console.warn('[Middleware] ⚠️ NO COOKIES FOUND IN REQUEST:', {
+      pathname,
+      requestUrl: request.url,
+      note: 'This means cookies were not set or not sent by browser'
+    })
+  }
+  
+  // Log if no auth cookies
+  if (authCookies.length === 0 && allCookies.length > 0) {
+    console.warn('[Middleware] ⚠️ NO AUTH COOKIES FOUND (but other cookies exist):', {
+      pathname,
+      allCookieNames: allCookies.map(c => c.name),
+      note: 'Auth cookies may have different names or not be set'
+    })
+  }
+  
   try {
+    const getUserStartTime = Date.now()
+    console.log('[Middleware] 🔐 Calling supabase.auth.getUser()...', {
+      pathname,
+      cookieCount: allCookies.length,
+      authCookieCount: authCookies.length,
+      timestamp: new Date().toISOString()
+    })
+    
     const { data: { user: fetchedUser }, error: fetchedError } = await supabase.auth.getUser();
+    const getUserDuration = Date.now() - getUserStartTime
+    
     user = fetchedUser;
     authError = fetchedError as Error | null;
+    
+    console.log('[Middleware] ⏱️ getUser() completed:', {
+      duration: `${getUserDuration}ms`,
+      hasUser: !!fetchedUser,
+      hasError: !!fetchedError,
+      userId: fetchedUser?.id?.substring(0, 8) + '...',
+      email: fetchedUser?.email?.substring(0, 20) + '...',
+      errorMessage: fetchedError?.message,
+      errorStatus: fetchedError?.status,
+      errorCode: (fetchedError as any)?.code,
+      pathname
+    })
     
     if (fetchedError) {
       console.log('[Middleware] ❌ getUser error:', { 

@@ -312,6 +312,11 @@ function LoginContent() {
         const verifyResult = await verifyResponse.json();
         const totalDuration = Date.now() - verifyStartTime
         
+        // Check for Set-Cookie headers in response
+        const setCookieHeader = verifyResponse.headers.get('set-cookie')
+        const allHeaders = Array.from(verifyResponse.headers.entries())
+        const cookieHeaders = allHeaders.filter(([key]) => key.toLowerCase() === 'set-cookie')
+        
         console.log('[Auth Page] 📡 verify-token API response received:', {
           success: verifyResult.success,
           hasError: !!verifyResult.error,
@@ -322,8 +327,31 @@ function LoginContent() {
           errorMessage: verifyResult.error,
           errorCode: verifyResult.code,
           fetchDuration: `${fetchDuration}ms`,
-          totalDuration: `${totalDuration}ms`
+          totalDuration: `${totalDuration}ms`,
+          hasSetCookieHeader: !!setCookieHeader,
+          setCookieHeaderCount: cookieHeaders.length,
+          setCookieHeaderPreview: setCookieHeader ? setCookieHeader.substring(0, 100) + '...' : 'none',
+          allResponseHeaders: Object.fromEntries(allHeaders),
+          note: 'Check if Set-Cookie headers are present in response'
         });
+        
+        // Check browser cookies after API call
+        if (typeof document !== 'undefined') {
+          const browserCookies = document.cookie.split(';').map(c => c.trim())
+          console.log('[Auth Page] 🍪 Browser cookies after API call:', {
+            cookieCount: browserCookies.length,
+            cookies: browserCookies.map(c => {
+              const [name, ...valueParts] = c.split('=')
+              return {
+                name: name || 'empty',
+                valueLength: valueParts.join('=').length,
+                valuePrefix: valueParts.join('=').substring(0, 30) + '...' || 'empty'
+              }
+            }),
+            hasAuthCookies: browserCookies.some(c => c.includes('auth') || c.includes('supabase')),
+            note: 'These cookies should be set by the API response'
+          })
+        }
 
         if (!verifyResult.success || verifyResponse.status !== 200) {
           const error = verifyResult.error || verifyResult.message || 'Verification failed';
@@ -371,6 +399,18 @@ function LoginContent() {
             note: 'Cookies should be set, middleware should detect user on next request'
           });
           
+          // Double-check browser cookies before redirect
+          if (typeof document !== 'undefined') {
+            const cookiesBeforeRedirect = document.cookie.split(';').map(c => c.trim())
+            console.log('[Auth Page] 🍪 Final cookie check before redirect:', {
+              cookieCount: cookiesBeforeRedirect.length,
+              cookieNames: cookiesBeforeRedirect.map(c => c.split('=')[0]),
+              hasAuthCookies: cookiesBeforeRedirect.some(c => c.includes('auth') || c.includes('supabase')),
+              allCookies: cookiesBeforeRedirect,
+              note: 'If cookies are missing here, they may not be set correctly'
+            })
+          }
+          
           // Success - redirect to dashboard or returnUrl
           // Use window.location.replace for full page reload to ensure middleware runs
           // Cookies are now set, so middleware should detect the user
@@ -379,13 +419,23 @@ function LoginContent() {
             from: window.location.pathname + window.location.search,
             to: finalReturnUrl,
             method: 'window.location.replace',
+            currentUrl: window.location.href,
+            targetUrl: finalReturnUrl,
             note: 'Full page reload will trigger middleware to check cookies'
           });
           
           // Small delay to ensure cookies are set before redirect
+          console.log('[Auth Page] ⏳ Waiting 100ms before redirect to ensure cookies are set...');
           await new Promise(resolve => setTimeout(resolve, 100));
           
-          console.log('[Auth Page] 🔄 Executing redirect now...');
+          console.log('[Auth Page] 🔄 Executing redirect now to:', finalReturnUrl);
+          console.log('[Auth Page] 📝 After redirect, middleware should:', {
+            step1: 'Detect cookies in request',
+            step2: 'Call supabase.auth.getUser()',
+            step3: 'Detect authenticated user',
+            step4: 'Redirect to target page if on /auth',
+            note: 'Check server logs for middleware output'
+          });
           window.location.replace(finalReturnUrl);
         } else {
           console.error('❌ No user returned from verification');
