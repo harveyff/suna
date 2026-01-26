@@ -59,6 +59,9 @@ function LoginContent() {
   const tokenVerified = useRef(false);
   const redirectAttempted = useRef(false); // Prevent multiple redirect attempts
   const redirectLoopDetected = useRef(false); // Track if we've detected a redirect loop
+  
+  // Extract _reauth parameter to avoid reading searchParams in useEffect
+  const needsReauth = searchParams.get('_reauth') === 'true';
 
   // CRITICAL: Redirect authenticated users immediately - this must run FIRST
   // Priority: Redirect before any token verification logic
@@ -74,7 +77,7 @@ function LoginContent() {
       currentPath: typeof window !== 'undefined' ? window.location.pathname : 'unknown',
       currentSearch: typeof window !== 'undefined' ? window.location.search : 'unknown',
       returnUrl,
-      needsReauth: searchParams.get('_reauth') === 'true'
+      needsReauth
     });
 
     // If we've detected a redirect loop, stop trying to redirect
@@ -96,7 +99,6 @@ function LoginContent() {
 
     // Check if user needs to reauthenticate (_reauth flag)
     // If so, don't redirect - let them reauthenticate
-    const needsReauth = searchParams.get('_reauth') === 'true';
     if (needsReauth) {
       console.log('[Auth Page] ℹ️ _reauth flag detected, allowing user to reauthenticate:', {
         needsReauth: true,
@@ -108,12 +110,17 @@ function LoginContent() {
     // Only redirect if we're not loading and user is authenticated
     // Skip if we're verifying a token (let token verification handle that)
     if (!isLoading && user && !verifyingToken) {
+      // CRITICAL: Set flag immediately to prevent multiple verification attempts
+      redirectAttempted.current = true;
+      
       console.log('[Auth Page] 🔐 User detected, starting session verification:', {
         userId: user.id?.substring(0, 8) + '...',
         email: user.email?.substring(0, 20) + '...',
         isLoading,
-        verifyingToken
+        verifyingToken,
+        redirectAttempted: redirectAttempted.current
       });
+      
       // CRITICAL: Verify session is actually valid before redirecting
       // getSession() may return a cached expired session, so we need to verify with getUser()
       const verifySession = async () => {
@@ -157,6 +164,7 @@ function LoginContent() {
             // Clear invalid session
             console.log('[Auth Page] 🧹 Clearing invalid session...');
             await supabase.auth.signOut();
+            // Reset flags after clearing session
             redirectAttempted.current = false;
             redirectLoopDetected.current = false;
             console.log('[Auth Page] ✅ Invalid session cleared, showing auth form');
@@ -237,6 +245,7 @@ function LoginContent() {
             });
           }
           
+          // Flag is already set at the start, but ensure it's still true
           redirectAttempted.current = true;
           
           console.log('[Auth Page] ✅ User authenticated with valid session, redirecting to:', {
@@ -268,8 +277,13 @@ function LoginContent() {
           });
           // On error, clear session and show auth form
           console.log('[Auth Page] 🧹 Clearing session due to error...');
-          const supabase = createClient();
-          await supabase.auth.signOut();
+          try {
+            const supabase = createClient();
+            await supabase.auth.signOut();
+          } catch (signOutError) {
+            console.error('[Auth Page] ❌ Error during signOut:', signOutError);
+          }
+          // Reset flags after error
           redirectAttempted.current = false;
           redirectLoopDetected.current = false;
           console.log('[Auth Page] ✅ Session cleared after error, showing auth form');
@@ -277,7 +291,11 @@ function LoginContent() {
       };
       
       // Verify session before redirecting
-      verifySession();
+      // Note: redirectAttempted.current is already set above to prevent multiple calls
+      verifySession().catch((error) => {
+        console.error('[Auth Page] ❌ Unhandled error in verifySession:', error);
+        redirectAttempted.current = false;
+      });
       return;
     } else if (!isLoading && !user) {
       // Reset redirect attempt flag when user logs out
@@ -299,7 +317,7 @@ function LoginContent() {
         reason: isLoading ? 'still loading' : verifyingToken ? 'verifying token' : 'unknown'
       });
     }
-  }, [user, isLoading, returnUrl, verifyingToken, searchParams]);
+  }, [user, isLoading, returnUrl, verifyingToken, needsReauth]); // Only depend on extracted values
 
   const isSuccessMessage =
     message &&
