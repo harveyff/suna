@@ -240,7 +240,7 @@ export async function middleware(request: NextRequest) {
   );
 
   // Fetch user ONCE and reuse for both locale detection and auth checks
-  let user: { id: string; user_metadata?: { locale?: string } } | null = null;
+  let user: { id: string; email?: string; user_metadata?: { locale?: string } } | null = null;
   let authError: Error | null = null;
   
   console.log('[Middleware] 🔍 Starting auth check:', {
