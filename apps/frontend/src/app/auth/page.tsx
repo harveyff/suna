@@ -211,7 +211,37 @@ function LoginContent() {
             name: error.name
           });
           
-          // Reset verification state on error so user can retry
+          // Check if it's a JSON parse error (likely wrong URL or HTML response)
+          const isJsonError = 
+            error.message?.includes('JSON') ||
+            error.message?.includes('Unexpected') ||
+            error.name === 'AuthUnknownError';
+          
+          // Check if it's a 404 error (wrong URL path)
+          const is404Error = 
+            error.status === 404 ||
+            error.message?.includes('404') ||
+            error.message?.includes('Not Found');
+          
+          if (isJsonError || is404Error) {
+            console.error('❌ API error - likely wrong Supabase URL or path:', {
+              error: error.message,
+              status: error.status,
+              isJsonError,
+              is404Error
+            });
+            
+            // Don't reset tokenVerified for URL errors - prevent infinite retry loop
+            // Instead, show error and stop retrying
+            setVerifyingToken(false);
+            toast.error('Verification failed', {
+              description: 'Unable to connect to authentication service. Please refresh the page and try again.',
+              duration: 5000,
+            });
+            return;
+          }
+          
+          // Reset verification state on other errors so user can retry
           tokenVerified.current = false;
           setVerifyingToken(false);
           
@@ -221,21 +251,6 @@ function LoginContent() {
             error.message?.toLowerCase().includes('invalid') ||
             error.code === 'expired_token' ||
             error.code === 'token_expired';
-          
-          // Check if it's a JSON parse error (likely wrong URL or HTML response)
-          const isJsonError = 
-            error.message?.includes('JSON') ||
-            error.message?.includes('Unexpected') ||
-            error.name === 'AuthUnknownError';
-          
-          if (isJsonError) {
-            console.error('❌ JSON parse error - likely wrong Supabase URL or HTML response');
-            toast.error('Verification failed', {
-              description: 'Unable to connect to authentication service. Please check your configuration.',
-              duration: 5000,
-            });
-            return;
-          }
           
           if (isExpired) {
             // Redirect to expired state
