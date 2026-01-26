@@ -174,7 +174,13 @@ function LoginContent() {
         console.log('🔐 Auto-verifying token from URL:', { token: actualToken.substring(0, 20) + '...', type: actualTokenType });
         
         const supabase = createClient();
-        console.log('📡 Supabase client created, calling verifyOtp...');
+        
+        // Log Supabase configuration for debugging
+        const supabaseConfig = supabase.supabaseUrl;
+        console.log('📡 Supabase client created:', {
+          url: supabaseConfig?.substring(0, 50) + '...',
+          callingVerifyOtp: true
+        });
         
         // For magic link PKCE tokens from GoTrue, we need to exchange the token
         // GoTrue sends PKCE tokens that need to be verified via the verify endpoint
@@ -198,6 +204,16 @@ function LoginContent() {
 
         if (error) {
           console.error('❌ Token verification failed:', error);
+          console.error('❌ Error details:', {
+            message: error.message,
+            status: error.status,
+            code: error.code,
+            name: error.name
+          });
+          
+          // Reset verification state on error so user can retry
+          tokenVerified.current = false;
+          setVerifyingToken(false);
           
           // Check if token is expired
           const isExpired = 
@@ -205,6 +221,21 @@ function LoginContent() {
             error.message?.toLowerCase().includes('invalid') ||
             error.code === 'expired_token' ||
             error.code === 'token_expired';
+          
+          // Check if it's a JSON parse error (likely wrong URL or HTML response)
+          const isJsonError = 
+            error.message?.includes('JSON') ||
+            error.message?.includes('Unexpected') ||
+            error.name === 'AuthUnknownError';
+          
+          if (isJsonError) {
+            console.error('❌ JSON parse error - likely wrong Supabase URL or HTML response');
+            toast.error('Verification failed', {
+              description: 'Unable to connect to authentication service. Please check your configuration.',
+              duration: 5000,
+            });
+            return;
+          }
           
           if (isExpired) {
             // Redirect to expired state
@@ -222,7 +253,6 @@ function LoginContent() {
             description: error.message || 'Invalid or expired link',
             duration: 5000,
           });
-          setVerifyingToken(false);
           return;
         }
 
