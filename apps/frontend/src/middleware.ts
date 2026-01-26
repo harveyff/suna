@@ -243,27 +243,47 @@ export async function middleware(request: NextRequest) {
   let user: { id: string; user_metadata?: { locale?: string } } | null = null;
   let authError: Error | null = null;
   
+  console.log('[Middleware] 🔍 Starting auth check:', {
+    pathname,
+    supabaseUrl: supabaseUrl.substring(0, 50) + '...',
+    hasCookies: request.cookies.getAll().length > 0,
+    cookieCount: request.cookies.getAll().length
+  });
+  
   try {
     const { data: { user: fetchedUser }, error: fetchedError } = await supabase.auth.getUser();
     user = fetchedUser;
     authError = fetchedError as Error | null;
     
     if (fetchedError) {
-      console.log('[Middleware] getUser error:', { 
+      console.log('[Middleware] ❌ getUser error:', { 
         message: fetchedError.message, 
         status: fetchedError.status,
-        pathname 
+        code: (fetchedError as any).code,
+        pathname,
+        errorType: fetchedError.name
       });
     } else if (fetchedUser) {
-      console.log('[Middleware] User authenticated:', { 
+      console.log('[Middleware] ✅ User authenticated:', { 
         userId: fetchedUser.id.substring(0, 8) + '...',
-        pathname 
+        email: fetchedUser.email?.substring(0, 20) + '...',
+        pathname,
+        hasSession: true
+      });
+    } else {
+      console.log('[Middleware] ℹ️ No user found (unauthenticated):', {
+        pathname,
+        hasError: !!fetchedError
       });
     }
   } catch (error) {
     // User might not be authenticated, continue
     authError = error as Error;
-    console.error('[Middleware] getUser exception:', error);
+    console.error('[Middleware] ❌ getUser exception:', {
+      error: error instanceof Error ? error.message : String(error),
+      pathname,
+      stack: error instanceof Error ? error.stack : undefined
+    });
   }
 
   // Auto-redirect based on geo-detection for marketing pages
@@ -315,28 +335,65 @@ export async function middleware(request: NextRequest) {
   // EXCEPTION: If _reauth=true is present, allow access (user needs to reauthenticate)
   if ((pathname === '/auth' || pathname.startsWith('/auth/')) && !pathname.startsWith('/auth/callback')) {
     const reauthParam = request.nextUrl.searchParams.get('_reauth');
+    const redirectParam = request.nextUrl.searchParams.get('redirect');
+    
+    console.log('[Middleware] 🔐 Processing /auth route:', {
+      pathname,
+      hasUser: !!user,
+      hasAuthError: !!authError,
+      reauthParam,
+      redirectParam,
+      allSearchParams: Object.fromEntries(request.nextUrl.searchParams.entries())
+    });
     
     // If _reauth=true, allow access even if user is authenticated (they need to reauthenticate)
     if (reauthParam === 'true') {
-      console.log('ℹ️ [Middleware] Allowing /auth access with _reauth=true flag');
+      console.log('[Middleware] ℹ️ Allowing /auth access with _reauth=true flag:', {
+        pathname,
+        hasUser: !!user,
+        userId: user?.id.substring(0, 8) + '...'
+      });
       // Continue to public routes check below
     } else if (user && !authError) {
       // User is authenticated - redirect to target page or dashboard
-      const redirectParam = request.nextUrl.searchParams.get('redirect');
       const targetPath = redirectParam || '/dashboard';
+      
+      console.log('[Middleware] 🔄 Authenticated user on /auth, checking redirect:', {
+        userId: user.id.substring(0, 8) + '...',
+        email: user.email?.substring(0, 20) + '...',
+        currentPath: pathname,
+        targetPath,
+        redirectParam,
+        willRedirect: targetPath !== pathname
+      });
       
       // Only redirect if target is different from current path
       if (targetPath !== pathname) {
-        console.log('🔄 [Middleware] Authenticated user on /auth, redirecting to:', targetPath, {
-          userId: user.id.substring(0, 8) + '...',
-          currentPath: pathname,
-          targetPath
-        });
         const redirectUrl = new URL(targetPath, request.url);
         // Clear redirect param to prevent loops
         redirectUrl.searchParams.delete('redirect');
+        
+        console.log('[Middleware] ✅ Redirecting authenticated user from /auth to:', {
+          from: pathname,
+          to: targetPath,
+          redirectUrl: redirectUrl.toString(),
+          clearedRedirectParam: true
+        });
+        
         return NextResponse.redirect(redirectUrl);
+      } else {
+        console.log('[Middleware] ⚠️ Target path same as current path, skipping redirect:', {
+          pathname,
+          targetPath
+        });
       }
+    } else {
+      console.log('[Middleware] ℹ️ Unauthenticated user on /auth, allowing access:', {
+        pathname,
+        hasUser: !!user,
+        hasAuthError: !!authError,
+        authErrorMessage: authError?.message
+      });
     }
   }
 
@@ -356,7 +413,16 @@ export async function middleware(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = '/auth';
       url.searchParams.set('redirect', pathname);
-      console.log('🔄 Redirecting unauthenticated user to /auth:', { pathname, hasUser: !!user, authError: !!authError });
+      
+      console.log('[Middleware] 🔄 Redirecting unauthenticated user to /auth:', { 
+        pathname, 
+        hasUser: !!user, 
+        hasAuthError: !!authError,
+        authErrorMessage: authError?.message,
+        authErrorStatus: (authError as any)?.status,
+        redirectUrl: url.toString()
+      });
+      
       return NextResponse.redirect(url);
     }
 
