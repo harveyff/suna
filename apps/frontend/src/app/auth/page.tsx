@@ -273,86 +273,73 @@ function LoginContent() {
       setVerifyingToken(true);
 
       try {
-        console.log('🔐 Auto-verifying token from URL:', { token: actualToken.substring(0, 20) + '...', type: actualTokenType });
-        
-        const supabase = createClient();
-        
-        // Log Supabase configuration for debugging
-        const supabaseConfig = supabase.supabaseUrl;
-        console.log('📡 Supabase client created:', {
-          url: supabaseConfig?.substring(0, 50) + '...',
-          callingVerifyOtp: true
+        const verifyStartTime = Date.now()
+        console.log('[Auth Page] 🔐 Starting token verification via server API:', {
+          tokenPrefix: actualToken.substring(0, 20) + '...',
+          type: actualTokenType,
+          currentPath: window.location.pathname,
+          currentSearch: window.location.search,
+          timestamp: new Date().toISOString()
         });
         
-        // For magic link PKCE tokens from GoTrue, we need to exchange the token
-        // GoTrue sends PKCE tokens that need to be verified via the verify endpoint
-        // We'll use the Supabase client's verifyOtp method with the token_hash parameter
-        const verifyResult = await supabase.auth.verifyOtp({
-          token_hash: actualToken,
-          type: actualTokenType as 'magiclink',
+        // CRITICAL: Verify token server-side so cookies are properly set
+        // This ensures middleware can detect the authenticated user
+        console.log('[Auth Page] 📡 Calling /api/auth/verify-token...')
+        const verifyResponse = await fetch('/api/auth/verify-token', {
+          method: 'POST',
+          credentials: 'include', // Important: include cookies
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            token_hash: actualToken,
+            type: actualTokenType,
+          }),
         });
         
-        console.log('📡 verifyOtp response received:', {
-          hasData: !!verifyResult.data,
-          hasError: !!verifyResult.error,
-          error: verifyResult.error ? {
-            message: verifyResult.error.message,
-            status: verifyResult.error.status,
-            code: verifyResult.error.code
-          } : null
-        });
-        
-        const { data, error } = verifyResult;
-
-        if (error) {
-          console.error('❌ Token verification failed:', error);
-          console.error('❌ Error details:', {
-            message: error.message,
-            status: error.status,
-            code: error.code,
-            name: error.name
-          });
-          
-          // Check if it's a JSON parse error (likely wrong URL or HTML response)
-          const isJsonError = 
-            error.message?.includes('JSON') ||
-            error.message?.includes('Unexpected') ||
-            error.name === 'AuthUnknownError';
-          
-          // Check if it's a 404 error (wrong URL path)
-          const is404Error = 
-            error.status === 404 ||
-            error.message?.includes('404') ||
-            error.message?.includes('Not Found');
-          
-          if (isJsonError || is404Error) {
-            console.error('❌ API error - likely wrong Supabase URL or path:', {
-              error: error.message,
-              status: error.status,
-              isJsonError,
-              is404Error
-            });
-            
-            // Don't reset tokenVerified for URL errors - prevent infinite retry loop
-            // Instead, show error and stop retrying
-            setVerifyingToken(false);
-            toast.error('Verification failed', {
-              description: 'Unable to connect to authentication service. Please refresh the page and try again.',
-              duration: 5000,
-            });
-            return;
+        const fetchDuration = Date.now() - verifyStartTime
+        console.log('[Auth Page] ⏱️ API call completed:', {
+          status: verifyResponse.status,
+          statusText: verifyResponse.statusText,
+          ok: verifyResponse.ok,
+          duration: `${fetchDuration}ms`,
+          headers: {
+            contentType: verifyResponse.headers.get('content-type'),
+            setCookie: verifyResponse.headers.get('set-cookie') ? 'present' : 'missing'
           }
+        });
+        
+        const verifyResult = await verifyResponse.json();
+        const totalDuration = Date.now() - verifyStartTime
+        
+        console.log('[Auth Page] 📡 verify-token API response received:', {
+          success: verifyResult.success,
+          hasError: !!verifyResult.error,
+          hasUser: !!verifyResult.user,
+          userId: verifyResult.user?.id?.substring(0, 8) + '...',
+          email: verifyResult.user?.email?.substring(0, 20) + '...',
+          status: verifyResponse.status,
+          errorMessage: verifyResult.error,
+          errorCode: verifyResult.code,
+          fetchDuration: `${fetchDuration}ms`,
+          totalDuration: `${totalDuration}ms`
+        });
+
+        if (!verifyResult.success || verifyResponse.status !== 200) {
+          const error = verifyResult.error || verifyResult.message || 'Verification failed';
           
-          // Reset verification state on other errors so user can retry
-          tokenVerified.current = false;
-          setVerifyingToken(false);
+          console.error('❌ Token verification failed:', {
+            error,
+            status: verifyResponse.status,
+            code: verifyResult.code
+          });
           
           // Check if token is expired
           const isExpired = 
-            error.message?.toLowerCase().includes('expired') ||
-            error.message?.toLowerCase().includes('invalid') ||
-            error.code === 'expired_token' ||
-            error.code === 'token_expired';
+            error.toLowerCase().includes('expired') ||
+            error.toLowerCase().includes('invalid') ||
+            verifyResult.code === 'expired_token' ||
+            verifyResult.code === 'token_expired';
           
           if (isExpired) {
             // Redirect to expired state
@@ -367,43 +354,47 @@ function LoginContent() {
           }
           
           toast.error('Verification failed', {
-            description: error.message || 'Invalid or expired link',
+            description: error || 'Invalid or expired link',
             duration: 5000,
           });
+          
+          // Reset verification state on error so user can retry
+          tokenVerified.current = false;
+          setVerifyingToken(false);
           return;
         }
 
-        if (data.user) {
-          console.log('✅ Token verified successfully, syncing cookies and redirecting...');
-          
-          // CRITICAL: After client-side token verification, we need to sync cookies
-          // so that middleware can detect the user. Call an API route to sync session.
-          try {
-            const syncResponse = await fetch('/api/auth/sync-session', {
-              method: 'POST',
-              credentials: 'include', // Important: include cookies
-              headers: {
-                'Content-Type': 'application/json',
-              },
-            });
-            
-            if (!syncResponse.ok) {
-              console.warn('[Auth Page] ⚠️ Failed to sync session cookies, but continuing:', {
-                status: syncResponse.status,
-                statusText: syncResponse.statusText
-              });
-            } else {
-              console.log('[Auth Page] ✅ Session cookies synced successfully');
-            }
-          } catch (syncError) {
-            console.warn('[Auth Page] ⚠️ Error syncing session cookies, but continuing:', syncError);
-          }
+        if (verifyResult.user) {
+          console.log('[Auth Page] ✅ Token verified successfully via server API:', {
+            userId: verifyResult.user.id?.substring(0, 8) + '...',
+            email: verifyResult.user.email?.substring(0, 20) + '...',
+            note: 'Cookies should be set, middleware should detect user on next request'
+          });
           
           // Success - redirect to dashboard or returnUrl
           // Use window.location.replace for full page reload to ensure middleware runs
+          // Cookies are now set, so middleware should detect the user
           const finalReturnUrl = returnUrl || '/dashboard';
-          console.log('[Auth Page] 🚀 Redirecting to:', finalReturnUrl);
+          console.log('[Auth Page] 🚀 Preparing redirect:', {
+            from: window.location.pathname + window.location.search,
+            to: finalReturnUrl,
+            method: 'window.location.replace',
+            note: 'Full page reload will trigger middleware to check cookies'
+          });
+          
+          // Small delay to ensure cookies are set before redirect
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          console.log('[Auth Page] 🔄 Executing redirect now...');
           window.location.replace(finalReturnUrl);
+        } else {
+          console.error('❌ No user returned from verification');
+          toast.error('Verification failed', {
+            description: 'No user returned from verification',
+            duration: 5000,
+          });
+          tokenVerified.current = false;
+          setVerifyingToken(false);
         }
       } catch (error: any) {
         console.error('❌ Unexpected error verifying token:', error);

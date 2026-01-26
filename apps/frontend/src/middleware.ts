@@ -243,11 +243,15 @@ export async function middleware(request: NextRequest) {
   let user: { id: string; email?: string; user_metadata?: { locale?: string } } | null = null;
   let authError: Error | null = null;
   
+  const allCookies = request.cookies.getAll()
   console.log('[Middleware] 🔍 Starting auth check:', {
     pathname,
     supabaseUrl: supabaseUrl.substring(0, 50) + '...',
-    hasCookies: request.cookies.getAll().length > 0,
-    cookieCount: request.cookies.getAll().length
+    hasCookies: allCookies.length > 0,
+    cookieCount: allCookies.length,
+    cookieNames: allCookies.map(c => c.name),
+    authCookieNames: allCookies.filter(c => c.name.includes('auth') || c.name.includes('supabase')).map(c => c.name),
+    cookieValues: allCookies.map(c => ({ name: c.name, valueLength: c.value?.length || 0, valuePrefix: c.value?.substring(0, 20) + '...' || 'empty' }))
   });
   
   try {
