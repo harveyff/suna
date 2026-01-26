@@ -511,6 +511,29 @@ export async function middleware(request: NextRequest) {
     // NOTE: Middleware is server-side code, so direct Supabase queries are acceptable here
     // for performance reasons. Only client-side (browser) code should use backend API.
     if (PROTECTED_ROUTES.some(route => pathname.startsWith(route))) {
+      // Check environment mode - LOCAL mode disables trial/billing checks
+      const envMode = process.env.NEXT_PUBLIC_ENV_MODE?.toUpperCase() || 'PRODUCTION';
+      const isLocalMode = envMode === 'LOCAL';
+      
+      console.log('[Middleware] 💳 Checking billing/trial status:', {
+        pathname,
+        envMode,
+        isLocalMode,
+        userId: user.id.substring(0, 8) + '...'
+      });
+      
+      // If in LOCAL mode, skip all trial/billing checks and allow access
+      // This is for self-hosted deployments where billing/trials are not needed
+      if (isLocalMode) {
+        console.log('[Middleware] ✅ LOCAL mode - skipping trial/billing checks:', {
+          pathname,
+          userId: user.id.substring(0, 8) + '...',
+          envMode,
+          note: 'Self-hosted deployment - trial/billing checks skipped'
+        });
+        return supabaseResponse;
+      }
+      
       const { data: accounts } = await supabase
         .schema('basejump')
         .from('accounts')

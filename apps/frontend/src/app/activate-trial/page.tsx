@@ -49,8 +49,24 @@ export default function ActivateTrialPage() {
   const { data: maintenanceNotice, isLoading: maintenanceLoading } = useMaintenanceNoticeQuery();
   const { data: adminRoleData, isLoading: isCheckingAdminRole } = useAdminRole();
   const isAdmin = adminRoleData?.isAdmin ?? false;
+  
+  // Check environment mode - LOCAL mode disables trial
+  const envMode = process.env.NEXT_PUBLIC_ENV_MODE?.toUpperCase() || 'PRODUCTION';
+  const isLocalMode = envMode === 'LOCAL';
+
+  // If in LOCAL mode, redirect to dashboard immediately (no trial needed)
+  useEffect(() => {
+    if (isLocalMode && user) {
+      console.log('[Activate Trial] LOCAL mode - trial disabled, redirecting to dashboard');
+      router.push('/dashboard');
+    }
+  }, [isLocalMode, user, router]);
 
   useEffect(() => {
+    if (isLocalMode) {
+      return; // Skip trial checks in LOCAL mode
+    }
+    
     if (!isLoadingSubscription && !isLoadingTrial && accountState && trialStatus) {
       const hasActiveTrial = trialStatus.has_trial && trialStatus.trial_status === 'active';
       const hasUsedTrial = trialStatus.trial_status === 'used' ||
@@ -68,7 +84,7 @@ export default function ActivateTrialPage() {
         router.push('/subscription');
       }
     }
-  }, [accountState, trialStatus, isLoadingSubscription, isLoadingTrial, router]);
+  }, [trialEnabled, accountState, trialStatus, isLoadingSubscription, isLoadingTrial, router]);
 
   const handleStartTrial = async () => {
     try {
@@ -103,6 +119,11 @@ export default function ActivateTrialPage() {
   }
 
   const isLoading = isLoadingSubscription || isLoadingTrial || maintenanceLoading || isCheckingAdminRole;
+
+  // If in LOCAL mode, show loading while redirecting
+  if (isLocalMode) {
+    return <ActivateTrialSkeleton />;
+  }
 
   // Show skeleton during initial load
   if (isLoading) {
