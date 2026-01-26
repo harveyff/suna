@@ -22,6 +22,7 @@ import { isElectron, getAuthOrigin } from '@/lib/utils/is-electron';
 import { ExampleShowcase } from '@/components/auth/example-showcase';
 import { trackSendAuthLink } from '@/lib/analytics/gtm';
 import { backendApi } from '@/lib/api-client';
+import { createClient } from '@/lib/supabase/client';
 
 // Lazy load heavy components
 const GoogleSignIn = lazy(() => import('@/components/GoogleSignIn'));
@@ -77,10 +78,93 @@ function LoginContent() {
   const [autoSendingCode, setAutoSendingCode] = useState(false);
   const [autoSendError, setAutoSendError] = useState(false);
   const autoSendAttempted = useRef(false);
+  
+  // Token verification state
+  const token = searchParams.get('token');
+  const tokenType = searchParams.get('type');
+  const [verifyingToken, setVerifyingToken] = useState(false);
+  const tokenVerified = useRef(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Auto-verify token from URL (magic link verification)
+  useEffect(() => {
+    const verifyTokenFromUrl = async () => {
+      // Skip if already verified, loading, or user already logged in
+      if (tokenVerified.current || verifyingToken || isLoading || user || !token || !tokenType) {
+        return;
+      }
+
+      // Only verify magiclink tokens
+      if (tokenType !== 'magiclink') {
+        return;
+      }
+
+      tokenVerified.current = true;
+      setVerifyingToken(true);
+
+      try {
+        console.log('🔐 Auto-verifying token from URL:', { token: token.substring(0, 20) + '...', type: tokenType });
+        
+        const supabase = createClient();
+        // For magic link PKCE tokens from GoTrue, we need to exchange the token
+        // GoTrue sends PKCE tokens that need to be verified via the verify endpoint
+        // We'll use the Supabase client's verifyOtp method with the token_hash parameter
+        const { data, error } = await supabase.auth.verifyOtp({
+          token_hash: token,
+          type: tokenType as 'magiclink',
+        });
+
+        if (error) {
+          console.error('❌ Token verification failed:', error);
+          
+          // Check if token is expired
+          const isExpired = 
+            error.message?.toLowerCase().includes('expired') ||
+            error.message?.toLowerCase().includes('invalid') ||
+            error.code === 'expired_token' ||
+            error.code === 'token_expired';
+          
+          if (isExpired) {
+            // Redirect to expired state
+            const expiredEmail = searchParams.get('email') || '';
+            const expiredUrl = new URL(window.location.href);
+            expiredUrl.searchParams.delete('token');
+            expiredUrl.searchParams.delete('type');
+            expiredUrl.searchParams.set('expired', 'true');
+            if (expiredEmail) expiredUrl.searchParams.set('email', expiredEmail);
+            window.location.href = expiredUrl.toString();
+            return;
+          }
+          
+          toast.error('Verification failed', {
+            description: error.message || 'Invalid or expired link',
+            duration: 5000,
+          });
+          setVerifyingToken(false);
+          return;
+        }
+
+        if (data.user) {
+          console.log('✅ Token verified successfully, redirecting...');
+          // Success - redirect to dashboard or returnUrl
+          const finalReturnUrl = returnUrl || '/dashboard';
+          window.location.href = finalReturnUrl;
+        }
+      } catch (error: any) {
+        console.error('❌ Unexpected error verifying token:', error);
+        toast.error('Verification failed', {
+          description: error.message || 'An unexpected error occurred',
+          duration: 5000,
+        });
+        setVerifyingToken(false);
+      }
+    };
+
+    verifyTokenFromUrl();
+  }, [token, tokenType, isLoading, user, returnUrl, verifyingToken]);
 
   useEffect(() => {
     if (isSuccessMessage) {
@@ -260,6 +344,18 @@ function LoginContent() {
 
     return result;
   };
+
+  // Show loading state while verifying token
+  if (verifyingToken) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <KortixLoader size="medium" />
+          <p className="text-sm text-muted-foreground">Verifying your magic link...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Don't show expired view if user is logged in or still loading
   if (isLoading || user) {
