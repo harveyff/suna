@@ -317,20 +317,20 @@ export async function middleware(request: NextRequest) {
   // Everything else requires authentication - reuse the user we already fetched
   try {
     
+    // Always allow /auth page through - let the page handle redirect logic
+    // This prevents redirect loops when user is authenticated
+    if (pathname === '/auth' || pathname.startsWith('/auth/')) {
+      console.log('✅ Allowing /auth page through:', { pathname, hasUser: !!user, isLoading });
+      return NextResponse.next();
+    }
+    
     // Redirect to auth if not authenticated (using the user we already fetched)
-    // But skip if we're already on /auth to prevent redirect loops
-    if ((authError || !user) && pathname !== '/auth') {
+    if (authError || !user) {
       const url = request.nextUrl.clone();
       url.pathname = '/auth';
       url.searchParams.set('redirect', pathname);
       console.log('🔄 Redirecting unauthenticated user to /auth:', { pathname, hasUser: !!user, authError: !!authError });
       return NextResponse.redirect(url);
-    }
-    
-    // If user is authenticated but on /auth page, let it through (the page will handle redirect)
-    if (user && pathname === '/auth') {
-      console.log('✅ User authenticated on /auth page, allowing through');
-      return NextResponse.next();
     }
 
     // Skip billing checks in local mode
