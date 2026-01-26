@@ -175,28 +175,48 @@ export async function middleware(request: NextRequest) {
     request,
   });
 
-  // Get Supabase configuration with fallbacks
-  // In Next.js standalone mode, these are available at runtime via environment variables
-  let supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-  let supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  // Get Supabase configuration for middleware (server-side)
+  // Priority: 1) SUPABASE_URL (server-side env var), 2) NEXT_PUBLIC_SUPABASE_URL (if absolute), 3) cluster-internal default
+  let supabaseUrl = (process.env.SUPABASE_URL || '').trim();
+  let supabaseKey = (process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
   
-  // Handle relative URLs (e.g., /supabase)
-  if (supabaseUrl && supabaseUrl.startsWith('/')) {
-    // In middleware, we can't access window.location, so we need to construct from request
-    const origin = request.nextUrl.origin;
-    supabaseUrl = origin + supabaseUrl;
+  // If server-side env var is not set, check NEXT_PUBLIC_SUPABASE_URL
+  if (!supabaseUrl || supabaseUrl.trim() === '') {
+    const publicUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
+    
+    // If public URL is a relative path (e.g., /kong/auth/v1), use cluster-internal default
+    // Middleware runs server-side and needs to access cluster-internal services
+    if (publicUrl && publicUrl.startsWith('/')) {
+      supabaseUrl = 'http://supabase-kong:8000';
+    } else if (publicUrl && 
+                !publicUrl.includes('demo.supabase.co') && 
+                !publicUrl.includes('placeholder')) {
+      // Use public URL if it's an absolute URL and not a demo/placeholder
+      supabaseUrl = publicUrl;
+    } else {
+      // Use cluster-internal default
+      supabaseUrl = 'http://supabase-kong:8000';
+    }
   }
   
-  // Fallback: if URL is empty or invalid, use current origin + /kong/auth/v1
-  if (!supabaseUrl || supabaseUrl.trim() === '' || supabaseUrl.includes('placeholder')) {
-    const origin = request.nextUrl.origin;
-    supabaseUrl = origin + '/kong/auth/v1';
+  // Ensure we're using cluster-internal URL for middleware (server-side)
+  if (supabaseUrl.includes('demo.supabase.co') || 
+      supabaseUrl.includes('placeholder') ||
+      supabaseUrl.trim() === '' ||
+      supabaseUrl.startsWith('/')) {
+    supabaseUrl = 'http://supabase-kong:8000';
   }
   
   // Fallback: if key is empty, use demo key
   if (!supabaseKey || supabaseKey.trim() === '') {
     supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
   }
+  
+  console.log('[Middleware] Supabase config:', { 
+    url: supabaseUrl.substring(0, 50) + '...', 
+    hasKey: !!supabaseKey,
+    usingServerEnv: !!process.env.SUPABASE_URL
+  });
 
   const supabase = createServerClient(
     supabaseUrl,
@@ -227,9 +247,23 @@ export async function middleware(request: NextRequest) {
     const { data: { user: fetchedUser }, error: fetchedError } = await supabase.auth.getUser();
     user = fetchedUser;
     authError = fetchedError as Error | null;
+    
+    if (fetchedError) {
+      console.log('[Middleware] getUser error:', { 
+        message: fetchedError.message, 
+        status: fetchedError.status,
+        pathname 
+      });
+    } else if (fetchedUser) {
+      console.log('[Middleware] User authenticated:', { 
+        userId: fetchedUser.id.substring(0, 8) + '...',
+        pathname 
+      });
+    }
   } catch (error) {
     // User might not be authenticated, continue
     authError = error as Error;
+    console.error('[Middleware] getUser exception:', error);
   }
 
   // Auto-redirect based on geo-detection for marketing pages
@@ -284,11 +318,19 @@ export async function middleware(request: NextRequest) {
   try {
     
     // Redirect to auth if not authenticated (using the user we already fetched)
-    if (authError || !user) {
+    // But skip if we're already on /auth to prevent redirect loops
+    if ((authError || !user) && pathname !== '/auth') {
       const url = request.nextUrl.clone();
       url.pathname = '/auth';
       url.searchParams.set('redirect', pathname);
+      console.log('🔄 Redirecting unauthenticated user to /auth:', { pathname, hasUser: !!user, authError: !!authError });
       return NextResponse.redirect(url);
+    }
+    
+    // If user is authenticated but on /auth page, let it through (the page will handle redirect)
+    if (user && pathname === '/auth') {
+      console.log('✅ User authenticated on /auth page, allowing through');
+      return NextResponse.next();
     }
 
     // Skip billing checks in local mode

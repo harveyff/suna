@@ -51,13 +51,23 @@ function LoginContent() {
 
   const { wasLastMethod: wasEmailLastMethod, markAsUsed: markEmailAsUsed } = useAuthMethodTracking('email');
 
+  const redirectAttempted = useRef(false);
+  
   useEffect(() => {
     // Redirect to dashboard if user is logged in
-    if (!isLoading && user) {
+    // Prevent redirect loops by checking if we've already attempted redirect
+    if (!isLoading && user && !redirectAttempted.current) {
       const finalReturnUrl = returnUrl || '/dashboard';
       console.log('✅ User already logged in, redirecting to:', finalReturnUrl);
+      
+      // Prevent multiple redirects
+      redirectAttempted.current = true;
+      
       // Use window.location.href for full page reload to ensure state is refreshed
-      window.location.href = finalReturnUrl;
+      // Add a small delay to ensure state is stable
+      setTimeout(() => {
+        window.location.href = finalReturnUrl;
+      }, 100);
     }
   }, [user, isLoading, returnUrl]);
 
