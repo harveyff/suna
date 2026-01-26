@@ -57,14 +57,70 @@ function LoginContent() {
   const tokenType = searchParams.get('type');
   const [verifyingToken, setVerifyingToken] = useState(false);
   const tokenVerified = useRef(false);
+  const redirectAttempted = useRef(false); // Prevent multiple redirect attempts
+  const redirectLoopDetected = useRef(false); // Track if we've detected a redirect loop
 
   // CRITICAL: Redirect authenticated users immediately - this must run FIRST
   // Priority: Redirect before any token verification logic
   useEffect(() => {
+    // If we've detected a redirect loop, stop trying to redirect
+    if (redirectLoopDetected.current) {
+      console.warn('⚠️ [Auth Page] Redirect loop detected, stopping redirect attempts');
+      return;
+    }
+
+    // Prevent multiple redirect attempts
+    if (redirectAttempted.current) {
+      return;
+    }
+
     // Only redirect if we're not loading and user is authenticated
     // Skip if we're verifying a token (let token verification handle that)
     if (!isLoading && user && !verifyingToken) {
       const finalReturnUrl = returnUrl || '/dashboard';
+      const currentPath = window.location.pathname;
+      
+      // Don't redirect if we're already on the target page (prevents loops)
+      if (currentPath === finalReturnUrl || currentPath.startsWith(finalReturnUrl + '/')) {
+        console.log('ℹ️ [Auth Page] Already on target page, skipping redirect:', {
+          currentPath,
+          finalReturnUrl
+        });
+        redirectAttempted.current = true;
+        return;
+      }
+      
+      // Detect redirect loop: if we're on /auth and we've attempted to redirect before
+      // Check sessionStorage to see if we've attempted this redirect recently
+      if (currentPath === '/auth') {
+        const redirectKey = `redirect_attempt_${finalReturnUrl}`;
+        const lastAttempt = sessionStorage.getItem(redirectKey);
+        const now = Date.now();
+        
+        if (lastAttempt) {
+          const timeSinceLastAttempt = now - parseInt(lastAttempt, 10);
+          // If we attempted redirect less than 3 seconds ago, it's likely a loop
+          if (timeSinceLastAttempt < 3000) {
+            console.error('❌ [Auth Page] Redirect loop detected! Stopping redirect to prevent infinite loop.', {
+              currentPath,
+              finalReturnUrl,
+              returnUrl,
+              timeSinceLastAttempt: `${timeSinceLastAttempt}ms`
+            });
+            redirectLoopDetected.current = true;
+            redirectAttempted.current = true;
+            // Clear the sessionStorage to allow manual navigation
+            sessionStorage.removeItem(redirectKey);
+            // Don't redirect - let the user see the auth page or handle it manually
+            return;
+          }
+        }
+        
+        // Record this redirect attempt
+        sessionStorage.setItem(redirectKey, now.toString());
+      }
+      
+      redirectAttempted.current = true;
       
       console.log('✅ [Auth Page] User authenticated, redirecting immediately to:', finalReturnUrl, {
         userId: user?.id,
@@ -75,10 +131,14 @@ function LoginContent() {
         verifyingToken
       });
       
-      // Immediate redirect - no delay, no checks
+      // Use window.location.replace for a full page navigation that doesn't add to history
+      // This ensures middleware runs fresh and prevents back button issues
       window.location.replace(finalReturnUrl);
       return;
     } else if (!isLoading && !user) {
+      // Reset redirect attempt flag when user logs out
+      redirectAttempted.current = false;
+      redirectLoopDetected.current = false;
       console.log('ℹ️ [Auth Page] User not authenticated, showing auth form', {
         isLoading,
         hasUser: !!user,
