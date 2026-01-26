@@ -74,6 +74,14 @@ function LoginContent() {
       return;
     }
 
+    // Check if user needs to reauthenticate (_reauth flag)
+    // If so, don't redirect - let them reauthenticate
+    const needsReauth = searchParams.get('_reauth') === 'true';
+    if (needsReauth) {
+      console.log('ℹ️ [Auth Page] _reauth flag detected, allowing user to reauthenticate');
+      return;
+    }
+
     // Only redirect if we're not loading and user is authenticated
     // Skip if we're verifying a token (let token verification handle that)
     if (!isLoading && user && !verifyingToken) {
@@ -147,7 +155,7 @@ function LoginContent() {
         currentSearch: window.location.search
       });
     }
-  }, [user, isLoading, returnUrl, verifyingToken]);
+  }, [user, isLoading, returnUrl, verifyingToken, searchParams]);
 
   const isSuccessMessage =
     message &&

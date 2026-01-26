@@ -309,6 +309,37 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // CRITICAL: Handle authenticated users on /auth BEFORE public routes check
+  // If user is authenticated and trying to access /auth, redirect them immediately
+  // This prevents client-side redirect loops
+  // EXCEPTION: If _reauth=true is present, allow access (user needs to reauthenticate)
+  if ((pathname === '/auth' || pathname.startsWith('/auth/')) && !pathname.startsWith('/auth/callback')) {
+    const reauthParam = request.nextUrl.searchParams.get('_reauth');
+    
+    // If _reauth=true, allow access even if user is authenticated (they need to reauthenticate)
+    if (reauthParam === 'true') {
+      console.log('ℹ️ [Middleware] Allowing /auth access with _reauth=true flag');
+      // Continue to public routes check below
+    } else if (user && !authError) {
+      // User is authenticated - redirect to target page or dashboard
+      const redirectParam = request.nextUrl.searchParams.get('redirect');
+      const targetPath = redirectParam || '/dashboard';
+      
+      // Only redirect if target is different from current path
+      if (targetPath !== pathname) {
+        console.log('🔄 [Middleware] Authenticated user on /auth, redirecting to:', targetPath, {
+          userId: user.id.substring(0, 8) + '...',
+          currentPath: pathname,
+          targetPath
+        });
+        const redirectUrl = new URL(targetPath, request.url);
+        // Clear redirect param to prevent loops
+        redirectUrl.searchParams.delete('redirect');
+        return NextResponse.redirect(redirectUrl);
+      }
+    }
+  }
+
   // Allow all public routes without any checks
   if (PUBLIC_ROUTES.some(route => pathname === route || pathname.startsWith(route + '/'))) {
     return NextResponse.next();
@@ -316,13 +347,9 @@ export async function middleware(request: NextRequest) {
 
   // Everything else requires authentication - reuse the user we already fetched
   try {
-    
-    // Always allow /auth page through - let the page handle redirect logic
-    // This prevents redirect loops when user is authenticated
-    if (pathname === '/auth' || pathname.startsWith('/auth/')) {
-      console.log('✅ Allowing /auth page through:', { pathname, hasUser: !!user });
-      return NextResponse.next();
-    }
+    // Note: /auth is already handled above (line 315-334) for authenticated users
+    // and by PUBLIC_ROUTES check (line 337) for unauthenticated users
+    // No need to check again here
     
     // Redirect to auth if not authenticated (using the user we already fetched)
     if (authError || !user) {
