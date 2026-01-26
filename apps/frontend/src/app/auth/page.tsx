@@ -52,64 +52,36 @@ function LoginContent() {
 
   const { wasLastMethod: wasEmailLastMethod, markAsUsed: markEmailAsUsed } = useAuthMethodTracking('email');
 
-  // Use sessionStorage to persist redirect state across page reloads
-  // This prevents infinite redirect loops when middleware redirects back to /auth
-  const REDIRECT_KEY = 'auth_redirect_attempted';
-  const REDIRECT_URL_KEY = 'auth_redirect_url';
-  
-  // Clear redirect state if we're coming back from a redirect (indicated by _from_auth param)
+  // CRITICAL: Redirect authenticated users immediately - this must run FIRST
+  // Priority: Redirect before any token verification logic
   useEffect(() => {
-    if (fromAuth) {
-      console.log('🔄 Detected _from_auth parameter - clearing redirect state and allowing redirect');
-      sessionStorage.removeItem(REDIRECT_KEY);
-      sessionStorage.removeItem(REDIRECT_URL_KEY);
-      
-      // Remove _from_auth parameter from URL to clean it up
-      const cleanUrl = new URL(window.location.href);
-      cleanUrl.searchParams.delete('_from_auth');
-      window.history.replaceState({}, '', cleanUrl.toString());
-    }
-  }, [fromAuth]);
-  
-  useEffect(() => {
-    // Redirect to dashboard if user is logged in
-    // Use sessionStorage to prevent redirect loops across page reloads
-    if (!isLoading && user) {
+    // Only redirect if we're not loading and user is authenticated
+    // Skip if we're verifying a token (let token verification handle that)
+    if (!isLoading && user && !verifyingToken) {
       const finalReturnUrl = returnUrl || '/dashboard';
       
-      // If we have _from_auth parameter, it means we just redirected and came back
-      // In this case, clear the redirect state and try again
-      if (fromAuth) {
-        console.log('🔄 _from_auth detected, clearing state and redirecting to:', finalReturnUrl);
-        sessionStorage.removeItem(REDIRECT_KEY);
-        sessionStorage.removeItem(REDIRECT_URL_KEY);
-        
-        // Redirect without _from_auth parameter to avoid loops
-        window.location.replace(finalReturnUrl);
-        return;
-      }
+      console.log('✅ [Auth Page] User authenticated, redirecting immediately to:', finalReturnUrl, {
+        userId: user?.id,
+        email: user?.email,
+        returnUrl,
+        currentPath: window.location.pathname,
+        currentSearch: window.location.search,
+        verifyingToken
+      });
       
-      // Check if we've already attempted to redirect to this URL in this session
-      const redirectAttempted = sessionStorage.getItem(REDIRECT_KEY) === 'true';
-      const lastRedirectUrl = sessionStorage.getItem(REDIRECT_URL_KEY);
-      
-      if (redirectAttempted && lastRedirectUrl === finalReturnUrl && !fromAuth) {
-        console.log('⏭️ Already attempted redirect to:', finalReturnUrl, '- preventing loop');
-        // Don't return - let the page render normally
-        return;
-      }
-      
-      console.log('✅ User already logged in, redirecting to:', finalReturnUrl);
-      
-      // Mark redirect as attempted in sessionStorage
-      sessionStorage.setItem(REDIRECT_KEY, 'true');
-      sessionStorage.setItem(REDIRECT_URL_KEY, finalReturnUrl);
-      
-      // Redirect without adding _from_auth to avoid confusion
-      // If middleware redirects back, it will add redirect param, not _from_auth
+      // Immediate redirect - no delay, no checks
       window.location.replace(finalReturnUrl);
+      return;
+    } else if (!isLoading && !user) {
+      console.log('ℹ️ [Auth Page] User not authenticated, showing auth form', {
+        isLoading,
+        hasUser: !!user,
+        returnUrl,
+        currentPath: window.location.pathname,
+        currentSearch: window.location.search
+      });
     }
-  }, [user, isLoading, returnUrl, fromAuth]);
+  }, [user, isLoading, returnUrl, verifyingToken]);
 
   const isSuccessMessage =
     message &&
