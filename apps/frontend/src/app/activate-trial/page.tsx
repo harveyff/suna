@@ -87,6 +87,13 @@ export default function ActivateTrialPage() {
   }, [isLocalMode, accountState, trialStatus, isLoadingSubscription, isLoadingTrial, router]);
 
   const handleStartTrial = async () => {
+    // In LOCAL mode, skip trial activation and redirect to dashboard
+    if (isLocalMode) {
+      console.log('[Activate Trial] LOCAL mode - trial disabled, redirecting to dashboard');
+      router.push('/dashboard');
+      return;
+    }
+
     try {
       const result = await startTrialMutation.mutateAsync({
         success_url: `${window.location.origin}/dashboard?trial=started`,

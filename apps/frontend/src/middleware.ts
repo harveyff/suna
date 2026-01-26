@@ -543,6 +543,16 @@ export async function middleware(request: NextRequest) {
         .single();
 
       if (!accounts) {
+        // In LOCAL mode, skip trial activation and allow access
+        if (isLocalMode) {
+          console.log('[Middleware] ✅ LOCAL mode - no account found, but allowing access (trial disabled):', {
+            pathname,
+            userId: user.id.substring(0, 8) + '...',
+            envMode,
+            note: 'Self-hosted deployment - account check skipped'
+          });
+          return supabaseResponse;
+        }
         const url = request.nextUrl.clone();
         url.pathname = '/activate-trial';
         return NextResponse.redirect(url);
@@ -564,6 +574,16 @@ export async function middleware(request: NextRequest) {
       const hasUsedTrial = !!trialHistory;
 
       if (!creditAccount) {
+        // In LOCAL mode, skip trial/subscription checks and allow access
+        if (isLocalMode) {
+          console.log('[Middleware] ✅ LOCAL mode - no credit account found, but allowing access (trial disabled):', {
+            pathname,
+            userId: user.id.substring(0, 8) + '...',
+            envMode,
+            note: 'Self-hosted deployment - credit account check skipped'
+          });
+          return supabaseResponse;
+        }
         if (hasUsedTrial) {
           const url = request.nextUrl.clone();
           url.pathname = '/subscription';
