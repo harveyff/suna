@@ -18,7 +18,7 @@ export async function createClient() {
   if (!supabaseUrl || supabaseUrl.trim() === '') {
     const publicUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim()
     
-    // Check if public URL is a relative path (e.g., /kong)
+    // Check if public URL is a relative path (e.g., /supabase)
     if (publicUrl && publicUrl.startsWith('/')) {
       // Relative paths can't be used server-side, use cluster-internal default
       supabaseUrl = 'http://supabase-kong:8000'

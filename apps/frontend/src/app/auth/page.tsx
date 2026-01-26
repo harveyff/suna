@@ -22,7 +22,6 @@ import { isElectron, getAuthOrigin } from '@/lib/utils/is-electron';
 import { ExampleShowcase } from '@/components/auth/example-showcase';
 import { trackSendAuthLink } from '@/lib/analytics/gtm';
 import { backendApi } from '@/lib/api-client';
-import { createClient } from '@/lib/supabase/client';
 
 // Lazy load heavy components
 const GoogleSignIn = lazy(() => import('@/components/GoogleSignIn'));
@@ -39,9 +38,6 @@ function LoginContent() {
   const isExpired = searchParams.get('expired') === 'true';
   const expiredEmail = searchParams.get('email') || '';
   const referralCodeParam = searchParams.get('ref') || '';
-  const token = searchParams.get('token'); // Token from magic link
-  const type = searchParams.get('type'); // Type from magic link (magiclink, etc.)
-  const termsAccepted = searchParams.get('terms_accepted') === 'true';
   const t = useTranslations('auth');
 
   const isSignUp = mode !== 'signin';
@@ -80,7 +76,6 @@ function LoginContent() {
   const [newCodeSent, setNewCodeSent] = useState(false);
   const [autoSendingCode, setAutoSendingCode] = useState(false);
   const [autoSendError, setAutoSendError] = useState(false);
-  const [verifyingToken, setVerifyingToken] = useState(false);
   const autoSendAttempted = useRef(false);
 
   useEffect(() => {
@@ -132,57 +127,6 @@ function LoginContent() {
 
     autoSendNewCode();
   }, [isExpired, expiredEmail, isLoading, user]);
-
-  // Handle token verification from magic link
-  useEffect(() => {
-    const verifyToken = async () => {
-      if (!token || !type || isLoading || user || verifyingToken) {
-        return;
-      }
-
-      setVerifyingToken(true);
-
-      try {
-        const supabase = createClient();
-        const email = expiredEmail || searchParams.get('email') || '';
-        
-        // Verify the token with Supabase
-        const { data, error } = await supabase.auth.verifyOtp({
-          token: token,
-          type: type as 'magiclink' | 'email' | 'recovery' | 'invite',
-          email: email || undefined,
-        });
-
-        if (error) {
-          console.error('Token verification failed:', error);
-          setVerifyingToken(false);
-          // Redirect to auth page with expired state if token is invalid/expired
-          const expiredUrl = new URL(window.location.href);
-          expiredUrl.pathname = '/auth';
-          expiredUrl.searchParams.set('expired', 'true');
-          if (email) expiredUrl.searchParams.set('email', email);
-          if (returnUrl) expiredUrl.searchParams.set('returnUrl', returnUrl);
-          window.location.href = expiredUrl.toString();
-          return;
-        }
-
-        if (data.user) {
-          // Success - redirect to dashboard
-          const redirectUrl = returnUrl || '/dashboard';
-          const isNewUser = data.user.created_at && Date.now() - new Date(data.user.created_at).getTime() < 60000;
-          window.location.href = `${redirectUrl}?auth_event=${isNewUser ? 'signup' : 'login'}&auth_method=email_magiclink`;
-        }
-      } catch (error) {
-        console.error('Unexpected error verifying token:', error);
-        setVerifyingToken(false);
-        toast.error('Verification failed', {
-          description: 'An unexpected error occurred. Please try again.',
-        });
-      }
-    };
-
-    verifyToken();
-  }, [token, type, isLoading, user, expiredEmail, returnUrl, searchParams, verifyingToken]);
 
   const handleAuth = async (prevState: any, formData: FormData) => {
     trackSendAuthLink();
@@ -317,8 +261,8 @@ function LoginContent() {
     return result;
   };
 
-  // Don't show expired view if user is logged in, still loading, or verifying token
-  if (isLoading || user || verifyingToken) {
+  // Don't show expired view if user is logged in or still loading
+  if (isLoading || user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <KortixLoader size="medium" />
