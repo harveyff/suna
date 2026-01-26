@@ -39,6 +39,7 @@ function LoginContent() {
   const isExpired = searchParams.get('expired') === 'true';
   const expiredEmail = searchParams.get('email') || '';
   const referralCodeParam = searchParams.get('ref') || '';
+  const fromAuth = searchParams.get('_from_auth') === 'true';
   const t = useTranslations('auth');
 
   const isSignUp = mode !== 'signin';
@@ -56,25 +57,45 @@ function LoginContent() {
   const REDIRECT_KEY = 'auth_redirect_attempted';
   const REDIRECT_URL_KEY = 'auth_redirect_url';
   
+  // Clear redirect state if we're coming back from a redirect (indicated by _from_auth param)
+  useEffect(() => {
+    if (fromAuth) {
+      console.log('🔄 Detected _from_auth parameter - clearing redirect state and allowing redirect');
+      sessionStorage.removeItem(REDIRECT_KEY);
+      sessionStorage.removeItem(REDIRECT_URL_KEY);
+      
+      // Remove _from_auth parameter from URL to clean it up
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete('_from_auth');
+      window.history.replaceState({}, '', cleanUrl.toString());
+    }
+  }, [fromAuth]);
+  
   useEffect(() => {
     // Redirect to dashboard if user is logged in
     // Use sessionStorage to prevent redirect loops across page reloads
     if (!isLoading && user) {
       const finalReturnUrl = returnUrl || '/dashboard';
       
+      // If we have _from_auth parameter, it means we just redirected and came back
+      // In this case, clear the redirect state and try again
+      if (fromAuth) {
+        console.log('🔄 _from_auth detected, clearing state and redirecting to:', finalReturnUrl);
+        sessionStorage.removeItem(REDIRECT_KEY);
+        sessionStorage.removeItem(REDIRECT_URL_KEY);
+        
+        // Redirect without _from_auth parameter to avoid loops
+        window.location.replace(finalReturnUrl);
+        return;
+      }
+      
       // Check if we've already attempted to redirect to this URL in this session
       const redirectAttempted = sessionStorage.getItem(REDIRECT_KEY) === 'true';
       const lastRedirectUrl = sessionStorage.getItem(REDIRECT_URL_KEY);
       
-      if (redirectAttempted && lastRedirectUrl === finalReturnUrl) {
+      if (redirectAttempted && lastRedirectUrl === finalReturnUrl && !fromAuth) {
         console.log('⏭️ Already attempted redirect to:', finalReturnUrl, '- preventing loop');
-        return;
-      }
-      
-      // Check if current URL already has a redirect marker (from previous redirect attempt)
-      const currentUrl = new URL(window.location.href);
-      if (currentUrl.searchParams.get('_redirected') === 'true') {
-        console.log('⏭️ Already redirected (URL marker present) - preventing loop');
+        // Don't return - let the page render normally
         return;
       }
       
@@ -84,26 +105,11 @@ function LoginContent() {
       sessionStorage.setItem(REDIRECT_KEY, 'true');
       sessionStorage.setItem(REDIRECT_URL_KEY, finalReturnUrl);
       
-      // Add redirect marker to URL to prevent loops
-      const redirectUrl = new URL(finalReturnUrl, window.location.origin);
-      redirectUrl.searchParams.set('_from_auth', 'true');
-      
-      // Use window.location.replace to prevent back button issues
-      // Replace doesn't add to history, preventing redirect loops
-      window.location.replace(redirectUrl.toString());
+      // Redirect without adding _from_auth to avoid confusion
+      // If middleware redirects back, it will add redirect param, not _from_auth
+      window.location.replace(finalReturnUrl);
     }
-  }, [user, isLoading, returnUrl]);
-  
-  // Clear redirect state when component unmounts (user navigates away)
-  useEffect(() => {
-    return () => {
-      // Only clear if we're navigating away from /auth (not redirecting)
-      if (!window.location.pathname.startsWith('/auth')) {
-        sessionStorage.removeItem(REDIRECT_KEY);
-        sessionStorage.removeItem(REDIRECT_URL_KEY);
-      }
-    };
-  }, []);
+  }, [user, isLoading, returnUrl, fromAuth]);
 
   const isSuccessMessage =
     message &&
