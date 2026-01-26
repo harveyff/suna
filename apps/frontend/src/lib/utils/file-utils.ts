@@ -8,6 +8,7 @@ import {
     FileAudio, FileType, Database, Archive, File
 } from 'lucide-react';
 import { getExtension } from './file-types';
+import { buildBackendUrl } from '@/lib/utils/backend-url';
 
 export type FileType =
     | 'image' | 'code' | 'text' | 'pdf'
@@ -141,7 +142,6 @@ export function getFileUrl(sandboxId: string | undefined, path: string): string 
     }
 
     // Use relative path to avoid mixed content errors
-    const { buildBackendUrl } = await import('@/lib/utils/backend-url');
     const baseUrl = buildBackendUrl(`/sandboxes/${sandboxId}/files/content`);
     const url = new URL(baseUrl, typeof window !== 'undefined' ? window.location.origin : 'https://placeholder.com');
     
