@@ -187,10 +187,10 @@ export async function middleware(request: NextRequest) {
     supabaseUrl = origin + supabaseUrl;
   }
   
-  // Fallback: if URL is empty or invalid, use current origin + /supabase
+  // Fallback: if URL is empty or invalid, use current origin + /kong/auth/v1
   if (!supabaseUrl || supabaseUrl.trim() === '' || supabaseUrl.includes('placeholder')) {
     const origin = request.nextUrl.origin;
-    supabaseUrl = origin + '/supabase';
+    supabaseUrl = origin + '/kong/auth/v1';
   }
   
   // Fallback: if key is empty, use demo key

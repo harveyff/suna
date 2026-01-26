@@ -54,9 +54,12 @@ function LoginContent() {
   useEffect(() => {
     // Redirect to dashboard if user is logged in
     if (!isLoading && user) {
-      router.replace(returnUrl || '/dashboard');
+      const finalReturnUrl = returnUrl || '/dashboard';
+      console.log('✅ User already logged in, redirecting to:', finalReturnUrl);
+      // Use window.location.href for full page reload to ensure state is refreshed
+      window.location.href = finalReturnUrl;
     }
-  }, [user, isLoading, router, returnUrl]);
+  }, [user, isLoading, returnUrl]);
 
   const isSuccessMessage =
     message &&
@@ -92,32 +95,59 @@ function LoginContent() {
   // Auto-verify token from URL (magic link verification)
   useEffect(() => {
     const verifyTokenFromUrl = async () => {
+      // Get token from URL directly (in case searchParams didn't capture it)
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlToken = urlParams.get('token') || token;
+      const urlTokenType = urlParams.get('type') || tokenType;
+      
       console.log('🔍 Token verification check:', {
         tokenVerified: tokenVerified.current,
         verifyingToken,
         isLoading,
         user: !!user,
-        token: token ? token.substring(0, 20) + '...' : 'missing',
-        tokenType,
+        tokenFromSearchParams: token ? token.substring(0, 20) + '...' : 'missing',
+        tokenFromURL: urlToken ? urlToken.substring(0, 20) + '...' : 'missing',
+        tokenTypeFromSearchParams: tokenType,
+        tokenTypeFromURL: urlTokenType,
+        fullURL: window.location.href,
         mounted
       });
 
-      // Skip if already verified, loading, or user already logged in
-      if (tokenVerified.current || verifyingToken || isLoading || user || !token || !tokenType) {
+      // Use URL token if searchParams token is missing
+      const actualToken = urlToken || token;
+      const actualTokenType = urlTokenType || tokenType;
+
+      // Skip if already verified or currently verifying
+      if (tokenVerified.current || verifyingToken) {
         console.log('⏭️ Skipping token verification:', {
-          reason: tokenVerified.current ? 'already verified' :
-                  verifyingToken ? 'already verifying' :
-                  isLoading ? 'loading' :
-                  user ? 'user logged in' :
-                  !token ? 'no token' :
-                  !tokenType ? 'no type' : 'unknown'
+          reason: tokenVerified.current ? 'already verified' : 'already verifying'
         });
         return;
       }
 
+      // Skip if no token
+      if (!actualToken || !actualTokenType) {
+        console.log('⏭️ Skipping token verification:', {
+          reason: !actualToken ? 'no token' : 'no type'
+        });
+        return;
+      }
+
+      // If user is already logged in, still verify the token to ensure session is valid
+      // This handles cases where user clicked magic link while already logged in
+      if (user && !isLoading) {
+        console.log('ℹ️ User already logged in, but verifying token anyway to ensure session validity');
+      }
+
+      // Skip if still loading auth state
+      if (isLoading) {
+        console.log('⏭️ Skipping token verification: loading auth state');
+        return;
+      }
+
       // Only verify magiclink tokens
-      if (tokenType !== 'magiclink') {
-        console.log('⏭️ Skipping - not a magiclink token:', tokenType);
+      if (actualTokenType !== 'magiclink') {
+        console.log('⏭️ Skipping - not a magiclink token:', actualTokenType);
         return;
       }
 
@@ -131,7 +161,7 @@ function LoginContent() {
       setVerifyingToken(true);
 
       try {
-        console.log('🔐 Auto-verifying token from URL:', { token: token.substring(0, 20) + '...', type: tokenType });
+        console.log('🔐 Auto-verifying token from URL:', { token: actualToken.substring(0, 20) + '...', type: actualTokenType });
         
         const supabase = createClient();
         console.log('📡 Supabase client created, calling verifyOtp...');
@@ -140,8 +170,8 @@ function LoginContent() {
         // GoTrue sends PKCE tokens that need to be verified via the verify endpoint
         // We'll use the Supabase client's verifyOtp method with the token_hash parameter
         const verifyResult = await supabase.auth.verifyOtp({
-          token_hash: token,
-          type: tokenType as 'magiclink',
+          token_hash: actualToken,
+          type: actualTokenType as 'magiclink',
         });
         
         console.log('📡 verifyOtp response received:', {
@@ -204,6 +234,21 @@ function LoginContent() {
 
     verifyTokenFromUrl();
   }, [token, tokenType, isLoading, user, returnUrl, verifyingToken, mounted]);
+  
+  // Also check URL params directly on mount (in case searchParams didn't update)
+  useEffect(() => {
+    if (mounted && !token && typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlToken = urlParams.get('token');
+      const urlTokenType = urlParams.get('type');
+      if (urlToken && urlTokenType && !tokenVerified.current) {
+        console.log('🔄 Detected token in URL params, triggering verification...');
+        // Force re-render by updating state (this will trigger the verification useEffect)
+        setVerifyingToken(false);
+        tokenVerified.current = false;
+      }
+    }
+  }, [mounted, token]);
 
   useEffect(() => {
     if (isSuccessMessage) {
