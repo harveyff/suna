@@ -37,7 +37,7 @@ import {
   consumePreconnectInfo,
 } from './stream-preconnect';
 
-import { buildBackendUrl, getBackendUrl } from '@/lib/utils/backend-url';
+// Dynamic imports will be used where needed to avoid SSR issues
 
 export interface AgentStreamCallbacks {
   onMessage: (message: UnifiedMessage) => void;
@@ -278,6 +278,7 @@ export function useAgentStream(
   }, []);
   
   const checkAgentStatus = useCallback(async (runId: string): Promise<{ status: string; error?: string }> => {
+    const { buildBackendUrl } = await import('../utils/backend-url');
     const response = await fetch(buildBackendUrl(`/agent-runs/${runId}/status`), {
       headers: {
         'Authorization': `Bearer ${await getAuthToken()}`,
@@ -617,7 +618,7 @@ export function useAgentStream(
     console.log(`[useAgentStream] Creating new stream connection for ${runId}`);
     
     const connection = new StreamConnection({
-      apiUrl: getBackendUrl(),
+      apiUrl: (await import('../utils/backend-url')).getBackendUrl(),
       runId,
       getAuthToken,
       onMessage: stableMessageHandler,
@@ -653,6 +654,7 @@ export function useAgentStream(
     if (runId) {
       try {
         const token = await getAuthToken();
+        const { buildBackendUrl } = await import('../utils/backend-url');
         await fetch(buildBackendUrl(`/agent-runs/${runId}/stop`), {
           method: 'POST',
           headers: {
