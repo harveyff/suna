@@ -320,7 +320,7 @@ export async function middleware(request: NextRequest) {
     // Always allow /auth page through - let the page handle redirect logic
     // This prevents redirect loops when user is authenticated
     if (pathname === '/auth' || pathname.startsWith('/auth/')) {
-      console.log('✅ Allowing /auth page through:', { pathname, hasUser: !!user, isLoading });
+      console.log('✅ Allowing /auth page through:', { pathname, hasUser: !!user });
       return NextResponse.next();
     }
     
