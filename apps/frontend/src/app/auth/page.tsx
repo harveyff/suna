@@ -52,6 +52,12 @@ function LoginContent() {
 
   const { wasLastMethod: wasEmailLastMethod, markAsUsed: markEmailAsUsed } = useAuthMethodTracking('email');
 
+  // Token verification state - must be declared before useEffect that uses it
+  const token = searchParams.get('token');
+  const tokenType = searchParams.get('type');
+  const [verifyingToken, setVerifyingToken] = useState(false);
+  const tokenVerified = useRef(false);
+
   // CRITICAL: Redirect authenticated users immediately - this must run FIRST
   // Priority: Redirect before any token verification logic
   useEffect(() => {
@@ -103,12 +109,6 @@ function LoginContent() {
   const [autoSendingCode, setAutoSendingCode] = useState(false);
   const [autoSendError, setAutoSendError] = useState(false);
   const autoSendAttempted = useRef(false);
-  
-  // Token verification state
-  const token = searchParams.get('token');
-  const tokenType = searchParams.get('type');
-  const [verifyingToken, setVerifyingToken] = useState(false);
-  const tokenVerified = useRef(false);
 
   useEffect(() => {
     setMounted(true);
