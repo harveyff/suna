@@ -92,13 +92,38 @@ function LoginContent() {
   // Auto-verify token from URL (magic link verification)
   useEffect(() => {
     const verifyTokenFromUrl = async () => {
+      console.log('🔍 Token verification check:', {
+        tokenVerified: tokenVerified.current,
+        verifyingToken,
+        isLoading,
+        user: !!user,
+        token: token ? token.substring(0, 20) + '...' : 'missing',
+        tokenType,
+        mounted
+      });
+
       // Skip if already verified, loading, or user already logged in
       if (tokenVerified.current || verifyingToken || isLoading || user || !token || !tokenType) {
+        console.log('⏭️ Skipping token verification:', {
+          reason: tokenVerified.current ? 'already verified' :
+                  verifyingToken ? 'already verifying' :
+                  isLoading ? 'loading' :
+                  user ? 'user logged in' :
+                  !token ? 'no token' :
+                  !tokenType ? 'no type' : 'unknown'
+        });
         return;
       }
 
       // Only verify magiclink tokens
       if (tokenType !== 'magiclink') {
+        console.log('⏭️ Skipping - not a magiclink token:', tokenType);
+        return;
+      }
+
+      // Wait for component to mount
+      if (!mounted) {
+        console.log('⏭️ Waiting for component to mount...');
         return;
       }
 
@@ -109,13 +134,27 @@ function LoginContent() {
         console.log('🔐 Auto-verifying token from URL:', { token: token.substring(0, 20) + '...', type: tokenType });
         
         const supabase = createClient();
+        console.log('📡 Supabase client created, calling verifyOtp...');
+        
         // For magic link PKCE tokens from GoTrue, we need to exchange the token
         // GoTrue sends PKCE tokens that need to be verified via the verify endpoint
         // We'll use the Supabase client's verifyOtp method with the token_hash parameter
-        const { data, error } = await supabase.auth.verifyOtp({
+        const verifyResult = await supabase.auth.verifyOtp({
           token_hash: token,
           type: tokenType as 'magiclink',
         });
+        
+        console.log('📡 verifyOtp response received:', {
+          hasData: !!verifyResult.data,
+          hasError: !!verifyResult.error,
+          error: verifyResult.error ? {
+            message: verifyResult.error.message,
+            status: verifyResult.error.status,
+            code: verifyResult.error.code
+          } : null
+        });
+        
+        const { data, error } = verifyResult;
 
         if (error) {
           console.error('❌ Token verification failed:', error);
@@ -164,7 +203,7 @@ function LoginContent() {
     };
 
     verifyTokenFromUrl();
-  }, [token, tokenType, isLoading, user, returnUrl, verifyingToken]);
+  }, [token, tokenType, isLoading, user, returnUrl, verifyingToken, mounted]);
 
   useEffect(() => {
     if (isSuccessMessage) {

@@ -96,11 +96,13 @@ export async function middleware(request: NextRequest) {
   }
   
   // Skip middleware for static files and API routes
+  // Also skip /kong/* paths - these are proxied to Supabase/Kong and should not be intercepted
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
     pathname.includes('.') ||
-    pathname.startsWith('/api/')
+    pathname.startsWith('/api/') ||
+    pathname.startsWith('/kong/')
   ) {
     return NextResponse.next();
   }
