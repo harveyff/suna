@@ -110,7 +110,8 @@ export const useVoicePlayerStore = create<VoicePlayerState>((set, get) => ({
         throw new Error('Not authenticated');
       }
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/voice/generate`, {
+      const { buildBackendUrl } = await import('@/lib/utils/backend-url');
+      const response = await fetch(buildBackendUrl('/voice/generate'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

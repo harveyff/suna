@@ -100,10 +100,15 @@ export function useCachedFile<T = string>(
       // Use normalized path consistently
       const normalizedPath = normalizePath(filePath || '');
       
-      const url = new URL(`${process.env.NEXT_PUBLIC_BACKEND_URL}/sandboxes/${sandboxId}/files/content`);
+      // Use relative path to avoid mixed content errors
+      const { buildBackendUrl } = await import('@/lib/utils/backend-url');
+      const basePath = buildBackendUrl(`/sandboxes/${sandboxId}/files/content`);
+      const url = new URL(basePath, typeof window !== 'undefined' ? window.location.origin : 'https://placeholder.com');
       
       // Properly encode the path parameter for UTF-8 support
       url.searchParams.append('path', normalizedPath);
+      // Use relative path
+      const relativePath = url.pathname + url.search;
       
       // Fetch with authentication
       const attemptFetch = async (isRetry: boolean = false): Promise<Response> => {
@@ -112,7 +117,7 @@ export function useCachedFile<T = string>(
           headers['Authorization'] = `Bearer ${session.access_token}`;
         }
         
-        const response = await fetch(url.toString(), {
+        const response = await fetch(relativePath, {
           headers
         });
         
@@ -441,13 +446,18 @@ export const FileCache = {
       // Create a promise for this preload and store it
       const preloadPromise = (async () => {
         try {        
-          const url = new URL(`${process.env.NEXT_PUBLIC_BACKEND_URL}/sandboxes/${sandboxId}/files/content`);
+          // Use relative path to avoid mixed content errors
+          const { buildBackendUrl } = await import('@/lib/utils/backend-url');
+          const basePath = buildBackendUrl(`/sandboxes/${sandboxId}/files/content`);
+          const url = new URL(basePath, typeof window !== 'undefined' ? window.location.origin : 'https://placeholder.com');
           
           // Properly encode the path parameter for UTF-8 support
           url.searchParams.append('path', normalizedPath);
+          // Use relative path
+          const relativePath = url.pathname + url.search;
           
           const attemptFetch = async (isRetry: boolean = false): Promise<Response> => {
-            const response = await fetch(url.toString(), {
+            const response = await fetch(relativePath, {
               headers: {
                 'Authorization': `Bearer ${token}`
               },
@@ -574,11 +584,16 @@ export async function getCachedFile(
   
   // Fetch fresh content
   try {
-    const url = new URL(`${process.env.NEXT_PUBLIC_BACKEND_URL}/sandboxes/${sandboxId}/files/content`);
+    // Use relative path to avoid mixed content errors
+    const { buildBackendUrl } = await import('@/lib/utils/backend-url');
+    const basePath = buildBackendUrl(`/sandboxes/${sandboxId}/files/content`);
+    const url = new URL(basePath, typeof window !== 'undefined' ? window.location.origin : 'https://placeholder.com');
     url.searchParams.append('path', normalizedPath);
+    // Use relative path
+    const relativePath = url.pathname + url.search;
     
     const attemptFetch = async (isRetry: boolean = false): Promise<Response> => {
-      const response = await fetch(url.toString(), {
+      const response = await fetch(relativePath, {
         headers: {
           'Authorization': `Bearer ${options.token}`
         }
@@ -659,10 +674,13 @@ export async function fetchFileContent(
   
   const attemptFetch = async (isRetry: boolean = false): Promise<string | Blob | any> => {
     try {
-      // Prepare the API URL
-      const apiUrl = `${process.env.NEXT_PUBLIC_BACKEND_URL}/sandboxes/${sandboxId}/files/content`;
-      const url = new URL(apiUrl);
+      // Prepare the API URL - use relative path to avoid mixed content errors
+      const { buildBackendUrl } = await import('@/lib/utils/backend-url');
+      const basePath = buildBackendUrl(`/sandboxes/${sandboxId}/files/content`);
+      const url = new URL(basePath, typeof window !== 'undefined' ? window.location.origin : 'https://placeholder.com');
       url.searchParams.append('path', filePath);
+      // Use relative path
+      const relativePath = url.pathname + url.search;
       
       // Set up fetch options
       const fetchOptions: RequestInit = {
@@ -673,7 +691,7 @@ export async function fetchFileContent(
       };
       
       // Execute fetch
-      const response = await fetch(url.toString(), fetchOptions);
+      const response = await fetch(relativePath, fetchOptions);
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Failed to fetch file content: ${response.status} ${errorText}`);

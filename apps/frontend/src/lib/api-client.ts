@@ -1,8 +1,9 @@
 import { createClient } from '@/lib/supabase/client';
 import { handleApiError, handleNetworkError, ErrorContext, ApiError } from './error-handler';
 import { parseTierRestrictionError, RequestTooLargeError } from './api/errors';
+import { getBackendUrl } from '@/lib/utils/backend-url';
 
-const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL || '';
+const API_URL = getBackendUrl();
 
 export interface ApiClientOptions {
   showErrors?: boolean;

@@ -4,7 +4,7 @@ import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 import { createClient } from '@/lib/supabase/client';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || '';
+import { buildBackendUrl } from '@/lib/utils/backend-url';
 
 export type ExportFormat = 'pdf' | 'docx' | 'html' | 'markdown';
 
@@ -423,10 +423,6 @@ export async function exportDocument({ content, fileName, format }: DocumentExpo
         const toastId = toast.loading('Exporting to PDF...');
         
         try {
-          if (!BACKEND_URL) {
-            throw new Error('Backend API URL not configured');
-          }
-
           // Get authentication token
           const supabase = createClient();
           const { data: { session } } = await supabase.auth.getSession();
@@ -435,7 +431,7 @@ export async function exportDocument({ content, fileName, format }: DocumentExpo
             throw new Error('Authentication required');
           }
 
-          const response = await fetch(`${BACKEND_URL}/export/pdf`, {
+          const response = await fetch(buildBackendUrl('/export/pdf'), {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -478,10 +474,6 @@ export async function exportDocument({ content, fileName, format }: DocumentExpo
         const toastId = toast.loading('Exporting to Word...');
         
         try {
-          if (!BACKEND_URL) {
-            throw new Error('Backend API URL not configured');
-          }
-
           // Get authentication token
           const supabase = createClient();
           const { data: { session } } = await supabase.auth.getSession();
@@ -490,7 +482,7 @@ export async function exportDocument({ content, fileName, format }: DocumentExpo
             throw new Error('Authentication required');
           }
 
-          const response = await fetch(`${BACKEND_URL}/export/docx`, {
+          const response = await fetch(buildBackendUrl('/export/docx'), {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

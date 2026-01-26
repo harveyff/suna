@@ -115,15 +115,20 @@ export async function fetchFileContent(
 ): Promise<string | Blob | any> {
   const normalizedPath = normalizePath(filePath);
   
-  const url = new URL(`${process.env.NEXT_PUBLIC_BACKEND_URL}/sandboxes/${sandboxId}/files/content`);
+  // Use relative path to avoid mixed content errors
+  const { buildBackendUrl } = await import('@/lib/utils/backend-url');
+  const basePath = buildBackendUrl(`/sandboxes/${sandboxId}/files/content`);
+  const url = new URL(basePath, typeof window !== 'undefined' ? window.location.origin : 'https://placeholder.com');
   url.searchParams.append('path', normalizedPath);
+  // Use relative path
+  const relativePath = url.pathname + url.search;
   
   const headers: Record<string, string> = {};
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
   
-  const response = await fetch(url.toString(), {
+  const response = await fetch(relativePath, {
     headers,
   });
   

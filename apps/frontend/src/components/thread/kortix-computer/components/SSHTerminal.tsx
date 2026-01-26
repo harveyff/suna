@@ -71,7 +71,16 @@ const lightTheme: ITheme = {
 };
 
 const getWebSocketUrl = () => {
-  const baseUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+  // Use relative path and convert to WebSocket protocol
+  // Browser will automatically use wss:// for HTTPS pages and ws:// for HTTP pages
+  const { getBackendUrl } = require('@/lib/utils/backend-url');
+  const baseUrl = getBackendUrl();
+  // For relative paths, use current origin
+  if (baseUrl.startsWith('/')) {
+    const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}${baseUrl}`;
+  }
+  // Fallback for absolute URLs (shouldn't happen with our normalization)
   return baseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
 };
 
