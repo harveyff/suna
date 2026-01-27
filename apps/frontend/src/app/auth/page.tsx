@@ -304,11 +304,57 @@ function LoginContent() {
     formData.set('token', otpCode);
     formData.set('returnUrl', returnUrl || '/dashboard');
 
-    console.log('🔄 [Auth Page] Calling verifyOtp server action...', {
+    console.log('🔄 [Auth Page] Calling verifyOtp route handler...', {
       email,
       timestamp: new Date().toISOString(),
     });
     
+    // Use Route Handler instead of Server Action to ensure cookies are properly set
+    try {
+      const response = await fetch('/auth/verify-otp', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ [Auth Page] verifyOtp route handler failed:', {
+          status: response.status,
+          error: errorData.message,
+          timestamp: new Date().toISOString(),
+        });
+        toast.error('Verification failed', {
+          description: errorData.message || 'Invalid or expired code',
+          duration: 5000,
+        });
+        return {};
+      }
+      
+      // Route handler will redirect, so we won't reach here
+      // But if we do, redirect manually
+      const redirectUrl = response.headers.get('Location');
+      if (redirectUrl) {
+        console.log('🔄 [Auth Page] Redirecting to:', {
+          redirectUrl,
+          timestamp: new Date().toISOString(),
+        });
+        router.push(redirectUrl);
+      }
+      
+      return {};
+    } catch (error) {
+      console.error('❌ [Auth Page] Error calling verifyOtp route handler:', {
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString(),
+      });
+      toast.error('Verification failed', {
+        description: 'An unexpected error occurred',
+        duration: 5000,
+      });
+      return {};
+    }
+    
+    // Fallback: use server action if route handler fails
     const result = await verifyOtp(prevState, formData);
     
     console.log('📥 [Auth Page] verifyOtp result received:', {

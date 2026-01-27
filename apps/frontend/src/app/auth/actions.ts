@@ -3,6 +3,7 @@
 import { createTrialCheckout } from '@/lib/api/billing';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
 
 
 export async function signIn(prevState: any, formData: FormData) {
@@ -362,6 +363,19 @@ export async function verifyOtp(prevState: any, formData: FormData) {
     userId: session.user.id,
     email: session.user.email,
     expiresAt: session.expires_at,
+    expiresAtDate: session.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'N/A',
+    timestamp: new Date().toISOString(),
+  });
+
+  // Verify cookies are set after session creation
+  const { cookies } = await import('next/headers');
+  const cookieStore = await cookies();
+  const allCookies = cookieStore.getAll();
+  const authCookies = allCookies.filter(c => c.name.startsWith('sb-'));
+  
+  console.log('🍪 [verifyOtp] Cookies after session creation:', {
+    totalCookies: allCookies.length,
+    authCookies: authCookies.map(c => ({ name: c.name, hasValue: !!c.value, valueLength: c.value?.length || 0 })),
     timestamp: new Date().toISOString(),
   });
 
@@ -380,9 +394,18 @@ export async function verifyOtp(prevState: any, formData: FormData) {
     redirectTo: `${redirectUrl.pathname}${redirectUrl.search}`,
     authEvent,
     userId: session.user.id,
+    hasSession: !!session,
+    hasCookies: authCookies.length > 0,
+    cookieNames: authCookies.map(c => c.name),
     timestamp: new Date().toISOString(),
   });
   
+  // Revalidate the path to ensure fresh data on redirect
+  // This helps ensure cookies are properly set before redirect
+  revalidatePath(redirectUrl.pathname);
+  
   // Server-side redirect ensures clean URL and proper session handling
+  // The cookies should be set by createServerClient automatically via setAll()
+  // Note: redirect() throws a NEXT_REDIRECT error which Next.js handles
   redirect(`${redirectUrl.pathname}${redirectUrl.search}`);
 }

@@ -65,13 +65,36 @@ export async function createClient() {
         },
         setAll(cookiesToSet) {
           try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            )
-          } catch {
+            console.log('🍪 [Supabase Server] Setting cookies:', {
+              cookieCount: cookiesToSet.length,
+              cookieNames: cookiesToSet.map(c => c.name),
+              timestamp: new Date().toISOString(),
+            });
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+              console.log('🍪 [Supabase Server] Cookie set:', {
+                name,
+                hasValue: !!value,
+                valueLength: value?.length || 0,
+                options: options ? {
+                  path: options.path,
+                  maxAge: options.maxAge,
+                  sameSite: options.sameSite,
+                  secure: options.secure,
+                  httpOnly: options.httpOnly,
+                } : undefined,
+                timestamp: new Date().toISOString(),
+              });
+            });
+          } catch (error) {
             // The `setAll` method was called from a Server Component.
             // This can be ignored if you have middleware refreshing
             // user sessions.
+            console.error('❌ [Supabase Server] Error setting cookies:', {
+              error: error instanceof Error ? error.message : String(error),
+              cookieCount: cookiesToSet.length,
+              timestamp: new Date().toISOString(),
+            });
           }
         },
       },
