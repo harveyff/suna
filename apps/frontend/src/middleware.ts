@@ -116,6 +116,44 @@ export async function middleware(request: NextRequest) {
     const type = searchParams.get('type');
     const error = searchParams.get('error');
     
+    // Check if user is already authenticated (even without token params)
+    // If authenticated user visits /auth without token, redirect to dashboard
+    const hasAuthCookie = request.cookies.has('sb-supabase-kong-auth-token') || 
+                          request.cookies.has('sb-2f5c36de-auth-token') ||
+                          request.cookies.has('sb-demo-auth-token');
+    
+    if (hasAuthCookie && pathname === '/auth' && !code && !token && !type && !error) {
+      // User is authenticated and visiting /auth without any auth params
+      // Redirect to dashboard to avoid showing login page
+      const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('X-Forwarded-Host');
+      const forwardedProto = request.headers.get('x-forwarded-proto') || request.headers.get('X-Forwarded-Proto') || 'https';
+      const host = request.headers.get('host') || request.headers.get('Host');
+      
+      let baseUrl: string;
+      if (forwardedHost) {
+        const protocol = forwardedProto || 'https';
+        baseUrl = `${protocol}://${forwardedHost}`;
+      } else if (host && !host.includes('0.0.0.0') && !host.includes('127.0.0.1')) {
+        const protocol = forwardedProto || 'https';
+        baseUrl = `${protocol}://${host}`;
+      } else {
+        baseUrl = request.nextUrl.origin;
+      }
+      
+      const returnUrl = searchParams.get('returnUrl') || searchParams.get('redirect') || '/dashboard';
+      const returnPath = returnUrl.startsWith('/') ? returnUrl : `/${returnUrl}`;
+      const dashboardUrl = new URL(returnPath, baseUrl);
+      
+      console.log('🚀 [Middleware] Authenticated user visiting /auth (no auth params), redirecting to dashboard:', {
+        from: pathname,
+        returnUrl,
+        redirectTo: dashboardUrl.toString(),
+        timestamp: new Date().toISOString(),
+      });
+      
+      return NextResponse.redirect(dashboardUrl);
+    }
+    
     // If we have Supabase auth parameters, check if user is already authenticated first
     if (code || token || type || error) {
       // Quick check: if user already has auth session cookie, skip redirect

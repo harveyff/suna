@@ -184,25 +184,35 @@ export default function DashboardLayoutContent({
         });
         
         const timeoutId = setTimeout(() => {
-          // Re-check user after delay
-          console.log('🔍 [Dashboard] Re-checking user after delay:', {
-            hasUser: !!user,
-            userId: user?.id,
+          // After delay, check if cookie still exists
+          // If cookie exists but user is still null, AuthProvider might be having issues
+          // But we'll give it more time by not redirecting immediately
+          // The effect will re-run when user changes, preventing unnecessary redirects
+          console.log('🔍 [Dashboard] Delay completed, checking cookie state...', {
             timestamp: new Date().toISOString(),
           });
           
-          if (!user) {
-            console.log('❌ [Dashboard] User still null after delay, redirecting to /auth', {
+          // Check current cookie state
+          const stillHasCookie = typeof document !== 'undefined' && (
+            document.cookie.includes('sb-supabase-kong-auth-token') ||
+            document.cookie.includes('sb-2f5c36de-auth-token') ||
+            document.cookie.includes('sb-demo-auth-token')
+          );
+          
+          if (!stillHasCookie) {
+            // Cookie is gone, definitely not authenticated
+            console.log('❌ [Dashboard] Cookie gone after delay, redirecting to /auth', {
               timestamp: new Date().toISOString(),
             });
             router.push('/auth');
           } else {
-            console.log('✅ [Dashboard] User found after delay, staying on dashboard', {
-              userId: user.id,
+            // Cookie still exists - AuthProvider might still be initializing
+            // Don't redirect - let the effect re-run when user state changes
+            console.log('⏳ [Dashboard] Cookie still exists, AuthProvider may still be initializing', {
               timestamp: new Date().toISOString(),
             });
           }
-        }, 500); // Wait 500ms for AuthProvider to initialize
+        }, 2000); // Increased to 2000ms to allow more time for session initialization after OTP verification
         
         return () => {
           console.log('🧹 [Dashboard] Cleaning up auth check timeout', {
