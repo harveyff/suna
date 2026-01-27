@@ -96,13 +96,11 @@ export async function middleware(request: NextRequest) {
   }
   
   // Skip middleware for static files and API routes
-  // Also skip /kong/* paths - these are proxied to Supabase/Kong and should not be intercepted
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
     pathname.includes('.') ||
-    pathname.startsWith('/api/') ||
-    pathname.startsWith('/kong/')
+    pathname.startsWith('/api/')
   ) {
     return NextResponse.next();
   }
@@ -175,48 +173,28 @@ export async function middleware(request: NextRequest) {
     request,
   });
 
-  // Get Supabase configuration for middleware (server-side)
-  // Priority: 1) SUPABASE_URL (server-side env var), 2) NEXT_PUBLIC_SUPABASE_URL (if absolute), 3) cluster-internal default
-  let supabaseUrl = (process.env.SUPABASE_URL || '').trim();
-  let supabaseKey = (process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
+  // Get Supabase configuration with fallbacks
+  // In Next.js standalone mode, these are available at runtime via environment variables
+  let supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  let supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
   
-  // If server-side env var is not set, check NEXT_PUBLIC_SUPABASE_URL
-  if (!supabaseUrl || supabaseUrl.trim() === '') {
-    const publicUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
-    
-    // If public URL is a relative path (e.g., /kong/auth/v1), use cluster-internal default
-    // Middleware runs server-side and needs to access cluster-internal services
-    if (publicUrl && publicUrl.startsWith('/')) {
-      supabaseUrl = 'http://supabase-kong:8000';
-    } else if (publicUrl && 
-                !publicUrl.includes('demo.supabase.co') && 
-                !publicUrl.includes('placeholder')) {
-      // Use public URL if it's an absolute URL and not a demo/placeholder
-      supabaseUrl = publicUrl;
-    } else {
-      // Use cluster-internal default
-      supabaseUrl = 'http://supabase-kong:8000';
-    }
+  // Handle relative URLs (e.g., /supabase)
+  if (supabaseUrl && supabaseUrl.startsWith('/')) {
+    // In middleware, we can't access window.location, so we need to construct from request
+    const origin = request.nextUrl.origin;
+    supabaseUrl = origin + supabaseUrl;
   }
   
-  // Ensure we're using cluster-internal URL for middleware (server-side)
-  if (supabaseUrl.includes('demo.supabase.co') || 
-      supabaseUrl.includes('placeholder') ||
-      supabaseUrl.trim() === '' ||
-      supabaseUrl.startsWith('/')) {
-    supabaseUrl = 'http://supabase-kong:8000';
+  // Fallback: if URL is empty or invalid, use current origin + /supabase
+  if (!supabaseUrl || supabaseUrl.trim() === '' || supabaseUrl.includes('placeholder')) {
+    const origin = request.nextUrl.origin;
+    supabaseUrl = origin + '/supabase';
   }
   
   // Fallback: if key is empty, use demo key
   if (!supabaseKey || supabaseKey.trim() === '') {
     supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
   }
-  
-  console.log('[Middleware] Supabase config:', { 
-    url: supabaseUrl.substring(0, 50) + '...', 
-    hasKey: !!supabaseKey,
-    usingServerEnv: !!process.env.SUPABASE_URL
-  });
 
   const supabase = createServerClient(
     supabaseUrl,
@@ -240,107 +218,16 @@ export async function middleware(request: NextRequest) {
   );
 
   // Fetch user ONCE and reuse for both locale detection and auth checks
-  let user: { id: string; email?: string; user_metadata?: { locale?: string } } | null = null;
+  let user: { id: string; user_metadata?: { locale?: string } } | null = null;
   let authError: Error | null = null;
   
-  const allCookies = request.cookies.getAll()
-  const authCookies = allCookies.filter(c => c.name.includes('auth') || c.name.includes('supabase') || c.name.includes('sb-'))
-  
-  console.log('[Middleware] 🔍 Starting auth check:', {
-    pathname,
-    supabaseUrl: supabaseUrl.substring(0, 50) + '...',
-    hasCookies: allCookies.length > 0,
-    cookieCount: allCookies.length,
-    cookieNames: allCookies.map(c => c.name),
-    authCookieCount: authCookies.length,
-    authCookieNames: authCookies.map(c => c.name),
-    cookieDetails: allCookies.map(c => ({ 
-      name: c.name, 
-      valueLength: c.value?.length || 0, 
-      valuePrefix: c.value?.substring(0, 30) + '...' || 'empty',
-      isAuthCookie: c.name.includes('auth') || c.name.includes('supabase') || c.name.includes('sb-')
-    })),
-    requestUrl: request.url,
-    requestMethod: request.method,
-    userAgent: request.headers.get('user-agent')?.substring(0, 50) + '...',
-    referer: request.headers.get('referer'),
-    timestamp: new Date().toISOString()
-  });
-  
-  // Log if no cookies at all
-  if (allCookies.length === 0) {
-    console.warn('[Middleware] ⚠️ NO COOKIES FOUND IN REQUEST:', {
-      pathname,
-      requestUrl: request.url,
-      note: 'This means cookies were not set or not sent by browser'
-    })
-  }
-  
-  // Log if no auth cookies
-  if (authCookies.length === 0 && allCookies.length > 0) {
-    console.warn('[Middleware] ⚠️ NO AUTH COOKIES FOUND (but other cookies exist):', {
-      pathname,
-      allCookieNames: allCookies.map(c => c.name),
-      note: 'Auth cookies may have different names or not be set'
-    })
-  }
-  
   try {
-    const getUserStartTime = Date.now()
-    console.log('[Middleware] 🔐 Calling supabase.auth.getUser()...', {
-      pathname,
-      cookieCount: allCookies.length,
-      authCookieCount: authCookies.length,
-      timestamp: new Date().toISOString()
-    })
-    
     const { data: { user: fetchedUser }, error: fetchedError } = await supabase.auth.getUser();
-    const getUserDuration = Date.now() - getUserStartTime
-    
     user = fetchedUser;
     authError = fetchedError as Error | null;
-    
-    console.log('[Middleware] ⏱️ getUser() completed:', {
-      duration: `${getUserDuration}ms`,
-      hasUser: !!fetchedUser,
-      hasError: !!fetchedError,
-      userId: fetchedUser?.id?.substring(0, 8) + '...',
-      email: fetchedUser?.email?.substring(0, 20) + '...',
-      errorMessage: fetchedError?.message,
-      errorStatus: fetchedError?.status,
-      errorCode: (fetchedError as any)?.code,
-      pathname
-    })
-    
-    if (fetchedError) {
-      console.log('[Middleware] ❌ getUser error:', { 
-        message: fetchedError.message, 
-        status: fetchedError.status,
-        code: (fetchedError as any).code,
-        pathname,
-        errorType: fetchedError.name
-      });
-    } else if (fetchedUser) {
-      console.log('[Middleware] ✅ User authenticated:', { 
-        userId: fetchedUser.id.substring(0, 8) + '...',
-        email: fetchedUser.email?.substring(0, 20) + '...',
-        pathname,
-        hasSession: true
-      });
-    } else {
-      console.log('[Middleware] ℹ️ No user found (unauthenticated):', {
-        pathname,
-        hasError: !!fetchedError
-      });
-    }
   } catch (error) {
     // User might not be authenticated, continue
     authError = error as Error;
-    console.error('[Middleware] ❌ getUser exception:', {
-      error: error instanceof Error ? error.message : String(error),
-      pathname,
-      stack: error instanceof Error ? error.stack : undefined
-    });
   }
 
   // Auto-redirect based on geo-detection for marketing pages
@@ -386,87 +273,6 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // CRITICAL: Handle authenticated users on /auth BEFORE public routes check
-  // If user is authenticated and trying to access /auth, redirect them immediately
-  // This prevents client-side redirect loops
-  // EXCEPTION: If _reauth=true is present, allow access (user needs to reauthenticate)
-  if ((pathname === '/auth' || pathname.startsWith('/auth/')) && !pathname.startsWith('/auth/callback')) {
-    const reauthParam = request.nextUrl.searchParams.get('_reauth');
-    const redirectParam = request.nextUrl.searchParams.get('redirect');
-    
-    console.log('[Middleware] 🔐 Processing /auth route:', {
-      pathname,
-      hasUser: !!user,
-      userId: user?.id?.substring(0, 8) + '...',
-      userEmail: user?.email?.substring(0, 20) + '...',
-      hasAuthError: !!authError,
-      authErrorType: authError?.name,
-      authErrorMessage: authError?.message,
-      authErrorStatus: (authError as any)?.status,
-      reauthParam,
-      redirectParam,
-      allSearchParams: Object.fromEntries(request.nextUrl.searchParams.entries()),
-      cookies: request.cookies.getAll().map(c => ({ name: c.name, hasValue: !!c.value }))
-    });
-    
-    // If _reauth=true, allow access even if user is authenticated (they need to reauthenticate)
-    if (reauthParam === 'true') {
-      console.log('[Middleware] ℹ️ Allowing /auth access with _reauth=true flag:', {
-        pathname,
-        hasUser: !!user,
-        userId: user?.id?.substring(0, 8) + '...'
-      });
-      // Continue to public routes check below
-    } else if (user && !authError) {
-      // User is authenticated - redirect to target page or dashboard
-      const targetPath = redirectParam || '/dashboard';
-      
-      console.log('[Middleware] 🔄 Authenticated user on /auth, checking redirect:', {
-        userId: user.id.substring(0, 8) + '...',
-        email: user.email?.substring(0, 20) + '...',
-        currentPath: pathname,
-        targetPath,
-        redirectParam,
-        willRedirect: targetPath !== pathname,
-        requestUrl: request.url
-      });
-      
-      // Only redirect if target is different from current path
-      if (targetPath !== pathname) {
-        const redirectUrl = new URL(targetPath, request.url);
-        // Clear redirect param to prevent loops
-        redirectUrl.searchParams.delete('redirect');
-        
-        console.log('[Middleware] ✅ Redirecting authenticated user from /auth to:', {
-          from: pathname,
-          to: targetPath,
-          redirectUrl: redirectUrl.toString(),
-          clearedRedirectParam: true,
-          userId: user.id.substring(0, 8) + '...'
-        });
-        
-        return NextResponse.redirect(redirectUrl);
-      } else {
-        console.log('[Middleware] ⚠️ Target path same as current path, skipping redirect:', {
-          pathname,
-          targetPath
-        });
-      }
-    } else {
-      // User is not authenticated or there was an auth error
-      console.log('[Middleware] ℹ️ Unauthenticated user on /auth, allowing access:', {
-        pathname,
-        hasUser: !!user,
-        userId: user?.id?.substring(0, 8) + '...',
-        hasAuthError: !!authError,
-        authErrorType: authError?.name,
-        authErrorMessage: authError?.message,
-        authErrorStatus: (authError as any)?.status,
-        reason: !user ? 'no user' : authError ? 'auth error' : 'unknown'
-      });
-    }
-  }
-
   // Allow all public routes without any checks
   if (PUBLIC_ROUTES.some(route => pathname === route || pathname.startsWith(route + '/'))) {
     return NextResponse.next();
@@ -474,25 +280,12 @@ export async function middleware(request: NextRequest) {
 
   // Everything else requires authentication - reuse the user we already fetched
   try {
-    // Note: /auth is already handled above (line 315-334) for authenticated users
-    // and by PUBLIC_ROUTES check (line 337) for unauthenticated users
-    // No need to check again here
     
     // Redirect to auth if not authenticated (using the user we already fetched)
     if (authError || !user) {
       const url = request.nextUrl.clone();
       url.pathname = '/auth';
       url.searchParams.set('redirect', pathname);
-      
-      console.log('[Middleware] 🔄 Redirecting unauthenticated user to /auth:', { 
-        pathname, 
-        hasUser: !!user, 
-        hasAuthError: !!authError,
-        authErrorMessage: authError?.message,
-        authErrorStatus: (authError as any)?.status,
-        redirectUrl: url.toString()
-      });
-      
       return NextResponse.redirect(url);
     }
 
@@ -511,29 +304,6 @@ export async function middleware(request: NextRequest) {
     // NOTE: Middleware is server-side code, so direct Supabase queries are acceptable here
     // for performance reasons. Only client-side (browser) code should use backend API.
     if (PROTECTED_ROUTES.some(route => pathname.startsWith(route))) {
-      // Check environment mode - LOCAL mode disables trial/billing checks
-      const envMode = process.env.NEXT_PUBLIC_ENV_MODE?.toUpperCase() || 'PRODUCTION';
-      const isLocalMode = envMode === 'LOCAL';
-      
-      console.log('[Middleware] 💳 Checking billing/trial status:', {
-        pathname,
-        envMode,
-        isLocalMode,
-        userId: user.id.substring(0, 8) + '...'
-      });
-      
-      // If in LOCAL mode, skip all trial/billing checks and allow access
-      // This is for self-hosted deployments where billing/trials are not needed
-      if (isLocalMode) {
-        console.log('[Middleware] ✅ LOCAL mode - skipping trial/billing checks:', {
-          pathname,
-          userId: user.id.substring(0, 8) + '...',
-          envMode,
-          note: 'Self-hosted deployment - trial/billing checks skipped'
-        });
-        return supabaseResponse;
-      }
-      
       const { data: accounts } = await supabase
         .schema('basejump')
         .from('accounts')
@@ -543,16 +313,6 @@ export async function middleware(request: NextRequest) {
         .single();
 
       if (!accounts) {
-        // In LOCAL mode, skip trial activation and allow access
-        if (isLocalMode) {
-          console.log('[Middleware] ✅ LOCAL mode - no account found, but allowing access (trial disabled):', {
-            pathname,
-            userId: user.id.substring(0, 8) + '...',
-            envMode,
-            note: 'Self-hosted deployment - account check skipped'
-          });
-          return supabaseResponse;
-        }
         const url = request.nextUrl.clone();
         url.pathname = '/activate-trial';
         return NextResponse.redirect(url);
@@ -574,16 +334,6 @@ export async function middleware(request: NextRequest) {
       const hasUsedTrial = !!trialHistory;
 
       if (!creditAccount) {
-        // In LOCAL mode, skip trial/subscription checks and allow access
-        if (isLocalMode) {
-          console.log('[Middleware] ✅ LOCAL mode - no credit account found, but allowing access (trial disabled):', {
-            pathname,
-            userId: user.id.substring(0, 8) + '...',
-            envMode,
-            note: 'Self-hosted deployment - credit account check skipped'
-          });
-          return supabaseResponse;
-        }
         if (hasUsedTrial) {
           const url = request.nextUrl.clone();
           url.pathname = '/subscription';

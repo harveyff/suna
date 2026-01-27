@@ -150,16 +150,11 @@ export default function DashboardLayoutContent({
   const isApiHealthy = healthData?.status === 'ok' && !healthError;
 
   // Check authentication status
-  // Note: Middleware should handle unauthenticated users, but this is a safety check
-  // Use window.location to ensure full page reload and proper middleware execution
   useEffect(() => {
     if (!isLoading && !user) {
-      // Get current pathname to preserve redirect
-      const currentPath = window.location.pathname;
-      // Use window.location instead of router.push to ensure middleware runs
-      window.location.href = `/auth?redirect=${encodeURIComponent(currentPath)}`;
+      router.push('/auth');
     }
-  }, [user, isLoading]);
+  }, [user, isLoading, router]);
 
   const isMaintenanceActive = (() => {
     if (!maintenanceNotice?.enabled || !maintenanceNotice.startTime || !maintenanceNotice.endTime) {

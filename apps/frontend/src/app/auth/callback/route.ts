@@ -23,23 +23,7 @@ export async function GET(request: NextRequest) {
 
   // Use request origin for redirects (most reliable for local dev)
   // This ensures localhost:3000 redirects stay on localhost, not staging
-  // Priority: X-Forwarded-Host > request.nextUrl.origin > NEXT_PUBLIC_URL > localhost
-  const forwardedHost = request.headers.get('x-forwarded-host')
-  const forwardedProto = request.headers.get('x-forwarded-proto') || 'https'
-  let requestOrigin = request.nextUrl.origin
-  
-  // If we have X-Forwarded-Host, use it (more reliable in Kubernetes/proxy environments)
-  if (forwardedHost && !requestOrigin.includes('0.0.0.0') && !requestOrigin.includes('127.0.0.1')) {
-    // Use forwarded host if it's a valid external domain
-    const hostParts = forwardedHost.split(':')
-    const host = hostParts[0]
-    const port = hostParts[1] ? `:${hostParts[1]}` : ''
-    requestOrigin = `${forwardedProto}://${host}${port}`
-  } else if (requestOrigin.includes('0.0.0.0') || requestOrigin.includes('127.0.0.1')) {
-    // Fallback to NEXT_PUBLIC_URL if request origin is internal
-    requestOrigin = process.env.NEXT_PUBLIC_URL || requestOrigin.replace('0.0.0.0', 'localhost').replace('127.0.0.1', 'localhost')
-  }
-  
+  const requestOrigin = request.nextUrl.origin
   const baseUrl = requestOrigin || process.env.NEXT_PUBLIC_URL || 'http://localhost:3000'
   const error = searchParams.get('error')
   const errorCode = searchParams.get('error_code')
@@ -85,15 +69,7 @@ export async function GET(request: NextRequest) {
     verifyUrl.searchParams.set('token', token)
     verifyUrl.searchParams.set('type', type)
     if (termsAccepted) verifyUrl.searchParams.set('terms_accepted', 'true')
-    if (email) verifyUrl.searchParams.set('email', email)
-    if (next && next !== '/dashboard') verifyUrl.searchParams.set('returnUrl', next)
     
-    console.log('🔄 Redirecting token verification to /auth:', { 
-      token: token.substring(0, 20) + '...', 
-      type, 
-      baseUrl,
-      verifyUrl: verifyUrl.toString() 
-    })
     return NextResponse.redirect(verifyUrl)
   }
 

@@ -59,8 +59,7 @@ ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
 ENV NEXT_PUBLIC_ENV_MODE=${NEXT_PUBLIC_ENV_MODE}
 
-# Clear Next.js cache and build
-RUN rm -rf .next && corepack enable pnpm && pnpm run build
+RUN corepack enable pnpm && pnpm run build
 
 
 # ---- Runner Stage ----

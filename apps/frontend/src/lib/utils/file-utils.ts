@@ -8,7 +8,6 @@ import {
     FileAudio, FileType, Database, Archive, File
 } from 'lucide-react';
 import { getExtension } from './file-types';
-import { buildBackendUrl } from '@/lib/utils/backend-url';
 
 export type FileType =
     | 'image' | 'code' | 'text' | 'pdf'
@@ -141,16 +140,12 @@ export function getFileUrl(sandboxId: string | undefined, path: string): string 
         console.error('Error processing Unicode escapes in path:', e);
     }
 
-    // Use relative path to avoid mixed content errors
-    const baseUrl = buildBackendUrl(`/sandboxes/${sandboxId}/files/content`);
-    const url = new URL(baseUrl, typeof window !== 'undefined' ? window.location.origin : 'https://placeholder.com');
-    
+    const url = new URL(`${process.env.NEXT_PUBLIC_BACKEND_URL}/sandboxes/${sandboxId}/files/content`);
+
     // Properly encode the path parameter for UTF-8 support
     url.searchParams.append('path', path);
 
-    // Return relative path if possible, otherwise full URL
-    const relativePath = url.pathname + url.search;
-    return relativePath.startsWith('/') ? relativePath : '/' + relativePath;
+    return url.toString();
 }
 
 /**

@@ -139,11 +139,10 @@ export default function RootLayout({
                     }
                   }
                   
-                  // Fallback: if URL is empty or invalid, use current origin + /kong
-                  // Note: Supabase client automatically appends /auth/v1 to the base URL
+                  // Fallback: if URL is empty or invalid, use current origin + /supabase
                   if (!supabaseUrl || supabaseUrl.trim() === '' || supabaseUrl.includes('placeholder')) {
                     if (typeof window !== 'undefined' && window.location) {
-                      supabaseUrl = window.location.origin + '/kong';
+                      supabaseUrl = window.location.origin + '/supabase';
                     } else {
                       supabaseUrl = 'https://demo.supabase.co';
                     }
@@ -184,7 +183,7 @@ export default function RootLayout({
                     Object.defineProperty(window, '__SUPABASE_CONFIG__', {
                       value: {
                         url: typeof window !== 'undefined' && window.location 
-                          ? window.location.origin + '/kong' 
+                          ? window.location.origin + '/supabase' 
                           : 'https://demo.supabase.co',
                         anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0',
                         initialized: false,

@@ -1,5 +1,7 @@
 import { StreamConnection, StreamConnectionOptions, createStreamConnection } from './stream-connection';
 
+const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL || '';
+
 export interface PreconnectedStream {
   connection: StreamConnection;
   agentRunId: string;
@@ -83,10 +85,8 @@ class StreamPreconnectService {
       getAuthToken,
     };
 
-    // Dynamic import to avoid SSR issues - use relative path for better compatibility
-    const { getBackendUrl } = await import('../utils/backend-url');
     const connection = createStreamConnection({
-      apiUrl: getBackendUrl(),
+      apiUrl: API_URL,
       runId: agentRunId,
       getAuthToken,
       onMessage: (data: string) => {

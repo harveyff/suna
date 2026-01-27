@@ -50,11 +50,10 @@ function getSupabaseConfig(): { url: string; anonKey: string } {
     }
   }
   
-  // Final fallback: use current origin + /kong if URL is invalid
-  // Note: Supabase client automatically appends /auth/v1 to the base URL
+  // Final fallback: use current origin + /supabase if URL is invalid
   if (!supabaseUrl || supabaseUrl.includes('placeholder') || supabaseUrl.trim() === '') {
     if (typeof window !== 'undefined' && window.location) {
-      supabaseUrl = window.location.origin + '/kong'
+      supabaseUrl = window.location.origin + '/supabase'
     } else {
       supabaseUrl = 'https://demo.supabase.co'
     }

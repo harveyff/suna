@@ -1,7 +1,8 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { backendApi } from '@/lib/api-client';
+
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || '';
 
 export interface IMaintenanceNotice {
   enabled: boolean;
@@ -27,24 +28,17 @@ export interface SystemStatusResponse {
 
 async function fetchSystemStatus(): Promise<SystemStatusResponse> {
   try {
-    // Use backendApi client which handles URL construction correctly
-    // It uses NEXT_PUBLIC_BACKEND_URL which should be relative path /v1 for same-origin requests
-    const result = await backendApi.get<SystemStatusResponse>('/system/status', {
-      showErrors: false, // Don't show errors for system status checks
-    });
+    const response = await fetch(`${BACKEND_URL}/system/status`);
     
-    if (!result.success || result.error) {
-      console.warn('Failed to fetch system status:', result.error?.message || 'Unknown error');
+    if (!response.ok) {
+      console.warn('Failed to fetch system status:', response.status);
       return {
         maintenanceNotice: { enabled: false },
         technicalIssue: { enabled: false },
       };
     }
     
-    return result.data || {
-      maintenanceNotice: { enabled: false },
-      technicalIssue: { enabled: false },
-    };
+    return await response.json();
   } catch (error) {
     console.warn('Failed to fetch system status:', error);
     return {

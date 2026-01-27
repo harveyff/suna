@@ -49,24 +49,8 @@ export default function ActivateTrialPage() {
   const { data: maintenanceNotice, isLoading: maintenanceLoading } = useMaintenanceNoticeQuery();
   const { data: adminRoleData, isLoading: isCheckingAdminRole } = useAdminRole();
   const isAdmin = adminRoleData?.isAdmin ?? false;
-  
-  // Check environment mode - LOCAL mode disables trial
-  const envMode = process.env.NEXT_PUBLIC_ENV_MODE?.toUpperCase() || 'PRODUCTION';
-  const isLocalMode = envMode === 'LOCAL';
-
-  // If in LOCAL mode, redirect to dashboard immediately (no trial needed)
-  useEffect(() => {
-    if (isLocalMode && user) {
-      console.log('[Activate Trial] LOCAL mode - trial disabled, redirecting to dashboard');
-      router.push('/dashboard');
-    }
-  }, [isLocalMode, user, router]);
 
   useEffect(() => {
-    if (isLocalMode) {
-      return; // Skip trial checks in LOCAL mode
-    }
-    
     if (!isLoadingSubscription && !isLoadingTrial && accountState && trialStatus) {
       const hasActiveTrial = trialStatus.has_trial && trialStatus.trial_status === 'active';
       const hasUsedTrial = trialStatus.trial_status === 'used' ||
@@ -84,16 +68,9 @@ export default function ActivateTrialPage() {
         router.push('/subscription');
       }
     }
-  }, [isLocalMode, accountState, trialStatus, isLoadingSubscription, isLoadingTrial, router]);
+  }, [accountState, trialStatus, isLoadingSubscription, isLoadingTrial, router]);
 
   const handleStartTrial = async () => {
-    // In LOCAL mode, skip trial activation and redirect to dashboard
-    if (isLocalMode) {
-      console.log('[Activate Trial] LOCAL mode - trial disabled, redirecting to dashboard');
-      router.push('/dashboard');
-      return;
-    }
-
     try {
       const result = await startTrialMutation.mutateAsync({
         success_url: `${window.location.origin}/dashboard?trial=started`,
@@ -126,11 +103,6 @@ export default function ActivateTrialPage() {
   }
 
   const isLoading = isLoadingSubscription || isLoadingTrial || maintenanceLoading || isCheckingAdminRole;
-
-  // If in LOCAL mode, show loading while redirecting
-  if (isLocalMode) {
-    return <ActivateTrialSkeleton />;
-  }
 
   // Show skeleton during initial load
   if (isLoading) {
