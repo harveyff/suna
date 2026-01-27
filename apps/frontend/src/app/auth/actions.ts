@@ -34,10 +34,23 @@ export async function signIn(prevState: any, formData: FormData) {
     emailRedirectTo = `kortix://auth/callback${params.toString() ? `?${params.toString()}` : ''}`;
   } else {
     // Priority: server-side env var > client origin
+    // IMPORTANT: This URL must be a full public URL (not internal address)
+    // Supabase uses this to generate the magic link in the email
     const publicUrl = process.env.NEXT_PUBLIC_URL || process.env.FRONTEND_PUBLIC_URL || origin;
     const finalOrigin = publicUrl.trim() !== '' ? publicUrl : origin;
     
-    emailRedirectTo = `${finalOrigin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
+    // Ensure we have a valid public URL (not internal address)
+    if (finalOrigin.includes('supabase-kong') || finalOrigin.includes('localhost') || finalOrigin.includes('127.0.0.1')) {
+      console.warn('⚠️ emailRedirectTo would use internal address, falling back to origin:', {
+        publicUrl,
+        finalOrigin,
+        origin,
+      });
+      // Use origin if public URL is not set or is internal
+      emailRedirectTo = `${origin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
+    } else {
+      emailRedirectTo = `${finalOrigin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
+    }
   }
 
   const { error } = await supabase.auth.signInWithOtp({
@@ -94,11 +107,23 @@ export async function signUp(prevState: any, formData: FormData) {
     emailRedirectTo = `kortix://auth/callback${params.toString() ? `?${params.toString()}` : ''}`;
   } else {
     // Priority: server-side env var > client origin
-    // This ensures we use the public domain, not internal addresses like supabase-kong
+    // IMPORTANT: This URL must be a full public URL (not internal address)
+    // Supabase uses this to generate the magic link in the email
     const publicUrl = process.env.NEXT_PUBLIC_URL || process.env.FRONTEND_PUBLIC_URL || origin;
     const finalOrigin = publicUrl.trim() !== '' ? publicUrl : origin;
     
-    emailRedirectTo = `${finalOrigin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
+    // Ensure we have a valid public URL (not internal address)
+    if (finalOrigin.includes('supabase-kong') || finalOrigin.includes('localhost') || finalOrigin.includes('127.0.0.1')) {
+      console.warn('⚠️ emailRedirectTo would use internal address, falling back to origin:', {
+        publicUrl,
+        finalOrigin,
+        origin,
+      });
+      // Use origin if public URL is not set or is internal
+      emailRedirectTo = `${origin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
+    } else {
+      emailRedirectTo = `${finalOrigin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
+    }
     
     console.log('📧 Setting emailRedirectTo:', {
       publicUrl: process.env.NEXT_PUBLIC_URL || 'not set',
@@ -213,10 +238,23 @@ export async function resendMagicLink(prevState: any, formData: FormData) {
     emailRedirectTo = `kortix://auth/callback${params.toString() ? `?${params.toString()}` : ''}`;
   } else {
     // Priority: server-side env var > client origin
+    // IMPORTANT: This URL must be a full public URL (not internal address)
+    // Supabase uses this to generate the magic link in the email
     const publicUrl = process.env.NEXT_PUBLIC_URL || process.env.FRONTEND_PUBLIC_URL || origin;
     const finalOrigin = publicUrl.trim() !== '' ? publicUrl : origin;
     
-    emailRedirectTo = `${finalOrigin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
+    // Ensure we have a valid public URL (not internal address)
+    if (finalOrigin.includes('supabase-kong') || finalOrigin.includes('localhost') || finalOrigin.includes('127.0.0.1')) {
+      console.warn('⚠️ emailRedirectTo would use internal address, falling back to origin:', {
+        publicUrl,
+        finalOrigin,
+        origin,
+      });
+      // Use origin if public URL is not set or is internal
+      emailRedirectTo = `${origin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
+    } else {
+      emailRedirectTo = `${finalOrigin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
+    }
   }
 
   const { error } = await supabase.auth.signInWithOtp({

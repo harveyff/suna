@@ -32,7 +32,21 @@ export async function GET(request: NextRequest) {
   // This handles reverse proxy scenarios where origin might be 0.0.0.0:3000
   const forwardedHost = request.headers.get('x-forwarded-host');
   const host = request.headers.get('host');
-  const protocol = request.headers.get('x-forwarded-proto') || request.nextUrl.protocol;
+  const forwardedProto = request.headers.get('x-forwarded-proto');
+  
+  // Determine protocol - ensure it has a colon
+  let protocol: string;
+  if (forwardedProto) {
+    protocol = forwardedProto.includes(':') ? forwardedProto : `${forwardedProto}:`;
+  } else {
+    // Extract protocol from nextUrl.origin or default to https
+    const origin = request.nextUrl.origin;
+    if (origin && origin.includes('://')) {
+      protocol = origin.split('://')[0] + ':';
+    } else {
+      protocol = 'https:'; // Default to https for production
+    }
+  }
   
   let baseUrl: string;
   if (forwardedHost) {
@@ -43,9 +57,16 @@ export async function GET(request: NextRequest) {
     baseUrl = request.nextUrl.origin || process.env.NEXT_PUBLIC_URL || 'http://localhost:3000';
   }
   
+  // Ensure baseUrl is valid (has protocol and host)
+  if (!baseUrl.includes('://')) {
+    console.warn('⚠️ Invalid baseUrl format, fixing:', baseUrl);
+    baseUrl = `https://${baseUrl.replace(/^https?:\/\//, '').replace(/^https?:\//, '')}`;
+  }
+  
   console.log('🌐 Base URL determined:', {
     forwardedHost,
     host,
+    forwardedProto,
     protocol,
     nextUrlOrigin: request.nextUrl.origin,
     finalBaseUrl: baseUrl,
@@ -85,6 +106,12 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = await createClient()
+  
+  // Log Supabase client configuration for debugging
+  console.log('🔍 Supabase client config:', {
+    supabaseUrl: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'not set',
+    hasAnonKey: !!(process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+  });
 
   // Handle token-based verification (magic link PKCE token)
   // Supabase sends these to the redirect URL for processing
