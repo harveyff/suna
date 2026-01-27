@@ -64,15 +64,16 @@ export async function createClient() {
           return cookieStore.getAll()
         },
         setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
+          // In Route Handlers, cookies().set() works correctly
+          // We need to set cookies so they're available for the response
+          cookiesToSet.forEach(({ name, value, options }) => {
+            try {
               cookieStore.set(name, value, options)
-            )
-          } catch {
-            // The `setAll` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
-          }
+            } catch (error) {
+              // Log error but don't fail - cookies might already be set
+              console.warn(`[Supabase Server] Failed to set cookie ${name}:`, error)
+            }
+          })
         },
       },
     }
