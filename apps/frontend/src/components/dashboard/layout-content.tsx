@@ -248,12 +248,34 @@ export default function DashboardLayoutContent({
   })();
 
   if (isLoading) {
+    console.log('⏳ [Dashboard] Rendering skeleton (loading):', {
+      isLoading: true,
+      timestamp: new Date().toISOString(),
+    });
     return <DashboardSkeleton />;
   }
 
   if (!user) {
+    const hasAuthCookie = typeof document !== 'undefined' && (
+      document.cookie.includes('sb-supabase-kong-auth-token') ||
+      document.cookie.includes('sb-2f5c36de-auth-token') ||
+      document.cookie.includes('sb-demo-auth-token')
+    );
+    
+    console.log('⏳ [Dashboard] Rendering skeleton (no user):', {
+      isLoading: false,
+      hasUser: false,
+      hasAuthCookie,
+      timestamp: new Date().toISOString(),
+    });
     return <DashboardSkeleton />;
   }
+  
+  console.log('✅ [Dashboard] Rendering dashboard content:', {
+    userId: user.id,
+    email: user.email,
+    timestamp: new Date().toISOString(),
+  });
 
   if (isMaintenanceActive && !systemStatusLoading && !isCheckingAdminRole && !isAdmin) {
     return (

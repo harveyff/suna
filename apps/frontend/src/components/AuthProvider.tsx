@@ -31,7 +31,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const getInitialSession = async () => {
+      // Check cookies before attempting to get session
+      const cookies = typeof document !== 'undefined' ? document.cookie : '';
+      const authCookies = typeof document !== 'undefined' 
+        ? document.cookie.split(';').filter(c => c.trim().startsWith('sb-')).map(c => c.trim().split('=')[0])
+        : [];
+      
       console.log('🔄 [AuthProvider] Starting session initialization...', {
+        hasCookies: cookies.length > 0,
+        authCookies,
+        cookieString: cookies.substring(0, 300),
         timestamp: new Date().toISOString(),
       });
       
@@ -45,6 +54,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           console.error('❌ [AuthProvider] Error getting session:', {
             error: sessionError.message,
             errorCode: sessionError.code,
+            hasCookies: cookies.length > 0,
+            authCookies,
             timestamp: new Date().toISOString(),
           });
         }
@@ -55,21 +66,37 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           userId: currentSession?.user?.id,
           email: currentSession?.user?.email,
           expiresAt: currentSession?.expires_at,
+          expiresAtDate: currentSession?.expires_at ? new Date(currentSession.expires_at * 1000).toISOString() : 'N/A',
+          isExpired: currentSession?.expires_at ? currentSession.expires_at * 1000 < Date.now() : false,
+          hasError: !!sessionError,
+          errorMessage: sessionError?.message,
           timestamp: new Date().toISOString(),
         });
         
         setSession(currentSession);
         setUser(currentSession?.user ?? null);
         
-        console.log('✅ [AuthProvider] Session initialized:', {
-          hasSession: !!currentSession,
-          hasUser: !!currentSession?.user,
-          userId: currentSession?.user?.id,
-          timestamp: new Date().toISOString(),
-        });
+        if (currentSession) {
+          console.log('✅ [AuthProvider] Session initialized:', {
+            hasSession: !!currentSession,
+            hasUser: !!currentSession?.user,
+            userId: currentSession?.user?.id,
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          console.warn('⚠️ [AuthProvider] No session found despite cookies:', {
+            authCookies,
+            hasError: !!sessionError,
+            errorMessage: sessionError?.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
       } catch (error) {
         console.error('❌ [AuthProvider] Unexpected error during session initialization:', {
           error: error instanceof Error ? error.message : String(error),
+          errorStack: error instanceof Error ? error.stack : undefined,
+          hasCookies: cookies.length > 0,
+          authCookies,
           timestamp: new Date().toISOString(),
         });
       } finally {

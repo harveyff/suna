@@ -80,15 +80,26 @@ export function createClient() {
   // Recreate client if config changed or client doesn't exist
   if (!supabaseClient || lastConfigHash !== configHash) {
     try {
+      console.log('🔧 [Supabase Client] Creating client:', {
+        url: config.url,
+        anonKeyPrefix: config.anonKey.substring(0, 20) + '...',
+        anonKeyLength: config.anonKey.length,
+        timestamp: new Date().toISOString(),
+      });
+      
       supabaseClient = createBrowserClient(config.url, config.anonKey)
       lastConfigHash = configHash
       
-      // Log successful initialization in development
-      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-        console.log('[Supabase Client] Initialized with URL:', config.url)
-      }
+      console.log('✅ [Supabase Client] Client created successfully:', {
+        url: config.url,
+        timestamp: new Date().toISOString(),
+      });
     } catch (error) {
-      console.error('[Supabase Client] Failed to create client:', error)
+      console.error('❌ [Supabase Client] Failed to create client:', {
+        error: error instanceof Error ? error.message : String(error),
+        url: config.url,
+        timestamp: new Date().toISOString(),
+      });
       // Return a client with fallback config even on error
       supabaseClient = createBrowserClient(
         config.url,
