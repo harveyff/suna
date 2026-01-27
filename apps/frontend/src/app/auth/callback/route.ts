@@ -258,6 +258,27 @@ export async function GET(request: NextRequest) {
           } else {
             data = verifyResult.data;
             console.log('✅ verifyOtp with token_hash succeeded for PKCE token');
+            
+            // CRITICAL: After verifyOtp succeeds, immediately check if session cookies were set
+            // This helps diagnose cookie setting issues
+            const { cookies: checkCookies } = await import('next/headers');
+            const checkCookieStore = await checkCookies();
+            const checkAllCookies = checkCookieStore.getAll();
+            const checkSessionCookie = checkAllCookies.find(c => 
+              c.name === 'sb-supabase-kong-auth-token' || 
+              (c.name.includes('supabase') && c.name.includes('auth-token') && !c.name.includes('code-verifier'))
+            );
+            
+            console.log('🔍 [AUTH_CALLBACK] After verifyOtp success - cookie check:', {
+              hasData: !!data,
+              hasUser: !!data?.user,
+              userId: data?.user?.id,
+              cookiesAfterVerify: checkAllCookies.length,
+              hasSessionCookie: !!checkSessionCookie,
+              sessionCookieName: checkSessionCookie?.name,
+              allCookieNames: checkAllCookies.map(c => c.name),
+              timestamp: new Date().toISOString(),
+            });
           }
         } else {
           data = exchangeResult.data;
@@ -424,15 +445,14 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // Ensure session is properly established by getting it
-        // This ensures cookies are set correctly via createServerClient's setAll
+        // CRITICAL: After token verification, Supabase should have set session cookies
+        // But we need to explicitly call getSession() to trigger cookie setting via setAll
+        // Then we need to ensure those cookies are copied to the redirect response
         console.log('🔍 [AUTH_CALLBACK] Getting session after token verification...');
         const sessionGetStartTime = Date.now();
         
-        // Wait a brief moment to ensure cookies are written to the response
-        // This helps prevent race conditions where cookies aren't yet available
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
+        // Call getSession() to trigger Supabase to set session cookies via setAll
+        // This is critical - without this, session cookies won't be set
         const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
         const sessionGetDuration = Date.now() - sessionGetStartTime;
         
@@ -455,14 +475,29 @@ export async function GET(request: NextRequest) {
           });
         }
 
-        // Get cookies AFTER session is established (so we capture all cookies set by createServerClient)
-        console.log('🔍 [AUTH_CALLBACK] Getting cookies from cookie store...');
+        // IMPORTANT: After getSession(), Supabase's setAll should have been called
+        // Now get cookies from the cookie store to capture what was set
+        console.log('🔍 [AUTH_CALLBACK] Getting cookies from cookie store after session establishment...');
         const cookieGetStartTime = Date.now();
         
-        // Re-fetch cookies to ensure we have the latest ones after session establishment
+        // Create a fresh cookie store instance to get the latest cookies
+        // This ensures we capture cookies that were just set by Supabase's setAll
         const cookieStoreAfterSession = await cookies();
         const allCookies = cookieStoreAfterSession.getAll();
         const cookieGetDuration = Date.now() - cookieGetStartTime;
+        
+        // Check specifically for the session cookie
+        const sessionCookie = allCookies.find(c => 
+          c.name === 'sb-supabase-kong-auth-token' || 
+          c.name.includes('supabase') && c.name.includes('auth-token') && !c.name.includes('code-verifier')
+        );
+        
+        console.log('🔍 [AUTH_CALLBACK] Session cookie check:', {
+          hasSessionCookie: !!sessionCookie,
+          sessionCookieName: sessionCookie?.name,
+          sessionCookieLength: sessionCookie?.value?.length || 0,
+          timestamp: new Date().toISOString(),
+        });
         
         console.log('🔍 [AUTH_CALLBACK] Cookies retrieved:', {
           cookiesCount: allCookies.length,
@@ -520,19 +555,57 @@ export async function GET(request: NextRequest) {
           timestamp: new Date().toISOString(),
         });
         
-        allCookies.forEach((cookie) => {
+        // CRITICAL: Only copy the ESSENTIAL session cookie to minimize header size
+        // Other cookies (code-verifier, etc.) are not needed for the redirect
+        // The browser will preserve existing cookies automatically
+        // This prevents "upstream sent too big header" 502 errors
+        
+        // Find the main session cookie (the one that actually contains the session)
+        const sessionCookie = allCookies.find(c => 
+          c.name === 'sb-supabase-kong-auth-token' ||
+          (c.name.includes('supabase') && c.name.includes('auth-token') && !c.name.includes('code-verifier'))
+        );
+        
+        // Also include code-verifier if it exists (needed for PKCE flow continuation)
+        const codeVerifierCookie = allCookies.find(c => 
+          c.name.includes('code-verifier') && c.name.includes('supabase')
+        );
+        
+        const essentialCookies = [sessionCookie, codeVerifierCookie].filter(Boolean) as typeof allCookies;
+        
+        console.log('🍪 [AUTH_CALLBACK] Filtering cookies to copy (minimizing header size):', {
+          totalCookies: allCookies.length,
+          essentialCookiesCount: essentialCookies.length,
+          essentialCookieNames: essentialCookies.map(c => c.name),
+          sessionCookieName: sessionCookie?.name,
+          sessionCookieLength: sessionCookie?.value?.length || 0,
+          skippedCookies: allCookies.length - essentialCookies.length,
+          skippedCookieNames: allCookies.filter(c => !essentialCookies.includes(c)).map(c => c.name),
+          timestamp: new Date().toISOString(),
+        });
+        
+        let cookiesCopied = 0;
+        let cookiesFailed = 0;
+        
+        essentialCookies.forEach((cookie) => {
           try {
-            // Copy cookie with proper options
+            // Minimize cookie options to reduce header size
+            // Use minimal options - path and sameSite are most important
             redirectResponse.cookies.set(cookie.name, cookie.value, {
               path: '/',
-              sameSite: 'lax',
-              httpOnly: cookie.name.includes('auth') || cookie.name.includes('supabase'),
+              sameSite: 'lax' as const,
+              // Only set httpOnly for session cookie, not code-verifier
+              httpOnly: cookie.name.includes('auth-token') && !cookie.name.includes('code-verifier'),
               secure: process.env.NODE_ENV === 'production',
+              // Don't set maxAge, expires, or domain - keep it minimal
             });
+            cookiesCopied++;
           } catch (error) {
+            cookiesFailed++;
             console.error(`❌ [AUTH_CALLBACK] Failed to copy cookie ${cookie.name}:`, {
               error: error instanceof Error ? error.message : String(error),
               cookieName: cookie.name,
+              valueLength: cookie.value?.length || 0,
               timestamp: new Date().toISOString(),
             });
           }
@@ -541,16 +614,26 @@ export async function GET(request: NextRequest) {
         const cookieCopyDuration = Date.now() - cookieCopyStartTime;
         
         console.log('🍪 [AUTH_CALLBACK] Cookies copied to redirect response:', {
-          cookiesCopied: redirectResponse.cookies.getAll().length,
+          cookiesCopied,
+          cookiesFailed,
+          totalCookiesInResponse: redirectResponse.cookies.getAll().length,
           cookieNames: redirectResponse.cookies.getAll().map(c => c.name),
           duration: `${cookieCopyDuration}ms`,
           timestamp: new Date().toISOString(),
         });
         
-        // Set additional headers to prevent caching issues
-        redirectResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+        // Set additional headers to prevent caching issues and ensure proper redirect handling
+        redirectResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
         redirectResponse.headers.set('Pragma', 'no-cache');
         redirectResponse.headers.set('Expires', '0');
+        redirectResponse.headers.set('X-Robots-Tag', 'noindex, nofollow');
+        
+        // Ensure redirect URL is absolute and valid
+        if (!redirectUrl.toString().startsWith('http')) {
+          console.error('❌ [AUTH_CALLBACK] Invalid redirect URL:', redirectUrl.toString());
+          const fallbackUrl = new URL('/dashboard', baseUrl);
+          return NextResponse.redirect(fallbackUrl, { status: 307 });
+        }
         
         const totalDuration = Date.now() - requestStartTime;
         
