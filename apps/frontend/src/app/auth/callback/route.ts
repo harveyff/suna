@@ -13,10 +13,19 @@ import type { NextRequest } from 'next/server'
  */
 
 export async function GET(request: NextRequest) {
-  console.log('🔍 Auth callback route hit:', {
+  const requestStartTime = Date.now();
+  console.log('🔍 [AUTH_CALLBACK] Route handler started:', {
     url: request.url,
     pathname: request.nextUrl.pathname,
     searchParams: Object.fromEntries(request.nextUrl.searchParams),
+    method: request.method,
+    headers: {
+      host: request.headers.get('host'),
+      'x-forwarded-host': request.headers.get('x-forwarded-host'),
+      'x-forwarded-proto': request.headers.get('x-forwarded-proto'),
+      'user-agent': request.headers.get('user-agent')?.substring(0, 50),
+    },
+    timestamp: new Date().toISOString(),
   });
 
   const { searchParams } = new URL(request.url)
@@ -106,12 +115,82 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = await createClient()
-  
+
   // Log Supabase client configuration for debugging
-  console.log('🔍 Supabase client config:', {
+  console.log('🔍 [AUTH_CALLBACK] Supabase client config:', {
     supabaseUrl: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'not set',
     hasAnonKey: !!(process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+    timestamp: new Date().toISOString(),
   });
+
+  // Check if user is already authenticated (prevent duplicate token verification)
+  // This handles cases where:
+  // 1. Token was already used and session was established
+  // 2. Browser retries the callback URL after redirect
+  // 3. Token expired but user already has a valid session
+  console.log('🔍 [AUTH_CALLBACK] Checking existing session...');
+  const sessionCheckStartTime = Date.now();
+  const { data: { session: existingSession }, error: sessionCheckError } = await supabase.auth.getSession()
+  const sessionCheckDuration = Date.now() - sessionCheckStartTime;
+  
+  console.log('🔍 [AUTH_CALLBACK] Session check result:', {
+    hasSession: !!existingSession,
+    hasUser: !!existingSession?.user,
+    userId: existingSession?.user?.id,
+    sessionExpiresAt: existingSession?.expires_at,
+    error: sessionCheckError?.message,
+    duration: `${sessionCheckDuration}ms`,
+    timestamp: new Date().toISOString(),
+  });
+  
+  if (existingSession && existingSession.user) {
+    // User already authenticated, redirect to dashboard without processing token again
+    // This prevents "token already used" errors when browser retries callback
+    const redirectUrl = new URL(`${baseUrl}${next}`)
+    console.log('✅ [AUTH_CALLBACK] User already authenticated, skipping token verification:', {
+      userId: existingSession.user.id,
+      redirectUrl: redirectUrl.toString(),
+      hasSession: true,
+      timestamp: new Date().toISOString(),
+    });
+    
+    const redirectStartTime = Date.now();
+    const redirectResponse = NextResponse.redirect(redirectUrl, { status: 307 })
+    
+    // Copy existing cookies to redirect response
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const allCookies = cookieStore.getAll();
+    
+    console.log('🔍 [AUTH_CALLBACK] Copying cookies to redirect response:', {
+      cookiesCount: allCookies.length,
+      cookieNames: allCookies.map(c => c.name),
+      timestamp: new Date().toISOString(),
+    });
+    
+    allCookies.forEach((cookie) => {
+      redirectResponse.cookies.set(cookie.name, cookie.value);
+    });
+    
+    redirectResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    redirectResponse.headers.set('Pragma', 'no-cache');
+    redirectResponse.headers.set('Expires', '0');
+    
+    const redirectDuration = Date.now() - redirectStartTime;
+    const totalDuration = Date.now() - requestStartTime;
+    
+    console.log('✅ [AUTH_CALLBACK] Redirect response created:', {
+      status: 307,
+      redirectUrl: redirectUrl.toString(),
+      cookiesInResponse: redirectResponse.cookies.getAll().map(c => c.name),
+      headers: Object.fromEntries(redirectResponse.headers.entries()),
+      redirectDuration: `${redirectDuration}ms`,
+      totalDuration: `${totalDuration}ms`,
+      timestamp: new Date().toISOString(),
+    });
+    
+    return redirectResponse
+  }
 
   // Handle token-based verification (magic link PKCE token)
   // Supabase sends these to the redirect URL for processing
@@ -188,7 +267,14 @@ export async function GET(request: NextRequest) {
       }
 
       if (error) {
-        console.error('❌ Error verifying token:', error)
+        console.error('❌ [AUTH_CALLBACK] Error verifying token:', {
+          error: error.message,
+          errorCode: error.code,
+          errorStatus: error.status,
+          tokenPrefix: token?.substring(0, 20),
+          type: finalType,
+          timestamp: new Date().toISOString(),
+        });
         
         // Check if the error is due to expired/invalid link
         const isExpired = 
@@ -199,18 +285,99 @@ export async function GET(request: NextRequest) {
           error.code === 'token_expired' ||
           error.code === 'otp_expired'
         
+        console.log('🔍 [AUTH_CALLBACK] Checking if error is expired/invalid:', {
+          isExpired,
+          errorMessage: error.message,
+          errorCode: error.code,
+          timestamp: new Date().toISOString(),
+        });
+        
+        // IMPORTANT: If token expired/invalid, check if user already has a valid session
+        // This handles cases where token was used successfully but browser retries the callback
         if (isExpired) {
-          // Redirect to auth page with expired state to show resend form
+          console.log('🔍 [AUTH_CALLBACK] Token expired/invalid, checking for existing session...');
+          const sessionCheckStartTime = Date.now();
+          const { data: { session: checkSession }, error: checkSessionError } = await supabase.auth.getSession();
+          const sessionCheckDuration = Date.now() - sessionCheckStartTime;
+          
+          console.log('🔍 [AUTH_CALLBACK] Session check after token error:', {
+            hasSession: !!checkSession,
+            hasUser: !!checkSession?.user,
+            userId: checkSession?.user?.id,
+            checkError: checkSessionError?.message,
+            duration: `${sessionCheckDuration}ms`,
+            timestamp: new Date().toISOString(),
+          });
+          
+          if (checkSession && checkSession.user) {
+            // Token expired but user already authenticated - redirect to dashboard
+            const redirectUrl = new URL(`${baseUrl}${next}`)
+            console.log('✅ [AUTH_CALLBACK] Token expired but user already authenticated, redirecting to dashboard:', {
+              redirectUrl: redirectUrl.toString(),
+              userId: checkSession.user.id,
+              timestamp: new Date().toISOString(),
+            });
+            
+            const redirectResponse = NextResponse.redirect(redirectUrl, { status: 307 })
+            
+            // Copy existing cookies to redirect response
+            const { cookies } = await import('next/headers');
+            const cookieStore = await cookies();
+            const allCookies = cookieStore.getAll();
+            
+            console.log('🔍 [AUTH_CALLBACK] Copying cookies for expired token redirect:', {
+              cookiesCount: allCookies.length,
+              cookieNames: allCookies.map(c => c.name),
+              timestamp: new Date().toISOString(),
+            });
+            
+            allCookies.forEach((cookie) => {
+              redirectResponse.cookies.set(cookie.name, cookie.value);
+            });
+            
+            redirectResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+            redirectResponse.headers.set('Pragma', 'no-cache');
+            redirectResponse.headers.set('Expires', '0');
+            
+            const totalDuration = Date.now() - requestStartTime;
+            console.log('✅ [AUTH_CALLBACK] Redirect response created for expired token:', {
+              redirectUrl: redirectUrl.toString(),
+              cookiesInResponse: redirectResponse.cookies.getAll().map(c => c.name),
+              totalDuration: `${totalDuration}ms`,
+              timestamp: new Date().toISOString(),
+            });
+            
+            return redirectResponse
+          }
+          
+          // Token expired and no session - redirect to auth page with expired state
           const expiredUrl = new URL(`${baseUrl}/auth`)
           expiredUrl.searchParams.set('expired', 'true')
           if (email) expiredUrl.searchParams.set('email', email)
           if (next) expiredUrl.searchParams.set('returnUrl', next)
 
-          console.log('🔄 Token expired, redirecting to auth page with expired state')
+          const totalDuration = Date.now() - requestStartTime;
+          console.log('🔄 [AUTH_CALLBACK] Token expired and no session, redirecting to auth page:', {
+            expiredUrl: expiredUrl.toString(),
+            email,
+            returnUrl: next,
+            totalDuration: `${totalDuration}ms`,
+            timestamp: new Date().toISOString(),
+          });
+          
           return NextResponse.redirect(expiredUrl)
         }
         
-        return NextResponse.redirect(`${baseUrl}/auth?error=${encodeURIComponent(error.message)}`)
+        const totalDuration = Date.now() - requestStartTime;
+        const errorRedirectUrl = `${baseUrl}/auth?error=${encodeURIComponent(error.message)}`;
+        console.log('❌ [AUTH_CALLBACK] Token verification failed, redirecting to auth with error:', {
+          errorRedirectUrl,
+          error: error.message,
+          totalDuration: `${totalDuration}ms`,
+          timestamp: new Date().toISOString(),
+        });
+        
+        return NextResponse.redirect(errorRedirectUrl)
       }
 
       // Token verified successfully, redirect to dashboard
@@ -241,48 +408,105 @@ export async function GET(request: NextRequest) {
 
         // Ensure session is properly established by getting it
         // This ensures cookies are set correctly via createServerClient's setAll
+        console.log('🔍 [AUTH_CALLBACK] Getting session after token verification...');
+        const sessionGetStartTime = Date.now();
         const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        const sessionGetDuration = Date.now() - sessionGetStartTime;
         
         if (sessionError) {
-          console.error('❌ Error getting session after token verification:', sessionError);
+          console.error('❌ [AUTH_CALLBACK] Error getting session after token verification:', {
+            error: sessionError.message,
+            errorCode: sessionError.status,
+            duration: `${sessionGetDuration}ms`,
+            timestamp: new Date().toISOString(),
+          });
         } else {
-          console.log('✅ Session established:', {
+          console.log('✅ [AUTH_CALLBACK] Session established:', {
             hasSession: !!sessionData.session,
             userId: sessionData.session?.user?.id,
+            sessionExpiresAt: sessionData.session?.expires_at,
+            accessTokenLength: sessionData.session?.access_token?.length,
+            refreshTokenLength: sessionData.session?.refresh_token?.length,
+            duration: `${sessionGetDuration}ms`,
+            timestamp: new Date().toISOString(),
           });
         }
 
         // Get cookies AFTER session is established (so we capture all cookies set by createServerClient)
+        console.log('🔍 [AUTH_CALLBACK] Getting cookies from cookie store...');
+        const cookieGetStartTime = Date.now();
         const { cookies } = await import('next/headers');
         const cookieStore = await cookies();
         const allCookies = cookieStore.getAll();
+        const cookieGetDuration = Date.now() - cookieGetStartTime;
+        
+        console.log('🔍 [AUTH_CALLBACK] Cookies retrieved:', {
+          cookiesCount: allCookies.length,
+          cookieNames: allCookies.map(c => c.name),
+          authCookies: allCookies.filter(c => c.name.includes('supabase') || c.name.includes('auth')).map(c => ({
+            name: c.name,
+            valueLength: c.value.length,
+          })),
+          duration: `${cookieGetDuration}ms`,
+          timestamp: new Date().toISOString(),
+        });
         
         // Redirect to dashboard with auth tracking params
         const redirectUrl = new URL(`${baseUrl}${next}`)
         redirectUrl.searchParams.set('auth_event', authEvent)
         redirectUrl.searchParams.set('auth_method', authMethod)
         
+        console.log('🔍 [AUTH_CALLBACK] Creating redirect response...', {
+          redirectUrl: redirectUrl.toString(),
+          authEvent,
+          authMethod,
+          timestamp: new Date().toISOString(),
+        });
+        
         // Create redirect response with proper status code
         // Use 307 (Temporary Redirect) instead of default 302 to preserve POST method and cookies
+        const redirectCreateStartTime = Date.now();
         const redirectResponse = NextResponse.redirect(redirectUrl, { status: 307 })
+        const redirectCreateDuration = Date.now() - redirectCreateStartTime;
+        
+        console.log('🔍 [AUTH_CALLBACK] Redirect response created, copying cookies...', {
+          status: 307,
+          redirectUrl: redirectUrl.toString(),
+          redirectCreateDuration: `${redirectCreateDuration}ms`,
+          timestamp: new Date().toISOString(),
+        });
         
         // CRITICAL: In Next.js App Router Route Handlers, cookies set via cookies().set() 
         // are NOT automatically included in NextResponse.redirect() responses.
         // We MUST explicitly copy all cookies to the redirect response.
         // This ensures the browser receives the session cookies when following the redirect.
+        const cookieCopyStartTime = Date.now();
         allCookies.forEach((cookie) => {
           redirectResponse.cookies.set(cookie.name, cookie.value);
         });
+        const cookieCopyDuration = Date.now() - cookieCopyStartTime;
         
         // Set additional headers to prevent caching issues
         redirectResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
         redirectResponse.headers.set('Pragma', 'no-cache');
         redirectResponse.headers.set('Expires', '0');
         
-        console.log('✅ Token verified successfully, redirecting to:', redirectUrl.toString(), {
+        const totalDuration = Date.now() - requestStartTime;
+        
+        console.log('✅ [AUTH_CALLBACK] Token verified successfully, redirecting:', {
+          redirectUrl: redirectUrl.toString(),
           cookiesCount: allCookies.length,
           cookieNames: allCookies.map(c => c.name).filter(name => name.includes('supabase') || name.includes('auth')),
           cookiesInResponse: redirectResponse.cookies.getAll().map(c => c.name).filter(name => name.includes('supabase') || name.includes('auth')),
+          responseHeaders: Object.fromEntries(redirectResponse.headers.entries()),
+          durations: {
+            sessionGet: `${sessionGetDuration}ms`,
+            cookieGet: `${cookieGetDuration}ms`,
+            redirectCreate: `${redirectCreateDuration}ms`,
+            cookieCopy: `${cookieCopyDuration}ms`,
+            total: `${totalDuration}ms`,
+          },
+          timestamp: new Date().toISOString(),
         });
         
         return redirectResponse
@@ -322,21 +546,39 @@ export async function GET(request: NextRequest) {
       }
       
       // Fallback: redirect to auth page with token for client-side handling
-      const verifyUrl = new URL(`${baseUrl}/auth`)
-      verifyUrl.searchParams.set('token', token)
+    const verifyUrl = new URL(`${baseUrl}/auth`)
+    verifyUrl.searchParams.set('token', token)
       verifyUrl.searchParams.set('type', finalType)
-      if (termsAccepted) verifyUrl.searchParams.set('terms_accepted', 'true')
+    if (termsAccepted) verifyUrl.searchParams.set('terms_accepted', 'true')
       if (next) verifyUrl.searchParams.set('returnUrl', next)
       if (errorMessage) verifyUrl.searchParams.set('error', encodeURIComponent(errorMessage))
-      
-      return NextResponse.redirect(verifyUrl)
+    
+    return NextResponse.redirect(verifyUrl)
     }
   }
 
   // Handle code exchange (OAuth, magic link)
   if (code) {
+    console.log('🔍 [AUTH_CALLBACK] Processing code parameter:', {
+      codePrefix: code.substring(0, 20) + '...',
+      codeLength: code.length,
+      timestamp: new Date().toISOString(),
+    });
+    
     try {
+      const codeExchangeStartTime = Date.now();
       const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+      const codeExchangeDuration = Date.now() - codeExchangeStartTime;
+      
+      console.log('🔍 [AUTH_CALLBACK] Code exchange result:', {
+        success: !error,
+        hasData: !!data,
+        hasUser: !!data?.user,
+        error: error?.message,
+        errorCode: error?.code,
+        duration: `${codeExchangeDuration}ms`,
+        timestamp: new Date().toISOString(),
+      });
       
       if (error) {
         console.error('❌ Error exchanging code for session:', error)
@@ -445,13 +687,50 @@ export async function GET(request: NextRequest) {
         response.cookies.set('pending-referral-code', '', { maxAge: 0, path: '/' })
       }
 
+      const totalDuration = Date.now() - requestStartTime;
+      console.log('✅ [AUTH_CALLBACK] Code exchange successful, redirecting:', {
+        redirectUrl: redirectUrl.toString(),
+        authEvent,
+        authMethod,
+        totalDuration: `${totalDuration}ms`,
+        timestamp: new Date().toISOString(),
+      });
+
       return response
-    } catch (error) {
-      console.error('❌ Unexpected error in auth callback:', error)
-      return NextResponse.redirect(`${baseUrl}/auth?error=unexpected_error`)
+    } catch (error: any) {
+      const totalDuration = Date.now() - requestStartTime;
+      console.error('❌ [AUTH_CALLBACK] Unexpected error in auth callback:', {
+        error: error?.message || error,
+        errorStack: error?.stack,
+        errorCode: error?.code,
+        totalDuration: `${totalDuration}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      
+      const errorRedirectUrl = `${baseUrl}/auth?error=unexpected_error`;
+      console.log('🔄 [AUTH_CALLBACK] Redirecting to auth page with error:', {
+        errorRedirectUrl,
+        timestamp: new Date().toISOString(),
+      });
+      
+      return NextResponse.redirect(errorRedirectUrl)
     }
   }
   
   // No code or token - redirect to auth page
-  return NextResponse.redirect(`${baseUrl}/auth`)
+  const totalDuration = Date.now() - requestStartTime;
+  console.log('⚠️ [AUTH_CALLBACK] No code or token provided in callback URL:', {
+    url: request.url,
+    searchParams: Object.fromEntries(request.nextUrl.searchParams),
+    totalDuration: `${totalDuration}ms`,
+    timestamp: new Date().toISOString(),
+  });
+  
+  const authRedirectUrl = `${baseUrl}/auth`;
+  console.log('🔄 [AUTH_CALLBACK] Redirecting to auth page:', {
+    authRedirectUrl,
+    timestamp: new Date().toISOString(),
+  });
+  
+  return NextResponse.redirect(authRedirectUrl)
 }
