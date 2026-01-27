@@ -548,27 +548,18 @@ export async function GET(request: NextRequest) {
         // This prevents "upstream sent too big header" 502 errors
         
         // Find the main session cookie (the one that actually contains the session)
+        // CRITICAL: Only copy the session cookie, NOT code-verifier
+        // The PKCE flow is complete after token verification, so code-verifier is no longer needed
+        // This minimizes response header size and prevents 502 errors
         const sessionCookie = allCookies.find(c => 
           c.name === 'sb-supabase-kong-auth-token' ||
           (c.name.includes('supabase') && c.name.includes('auth-token') && !c.name.includes('code-verifier'))
         );
         
-        // Also include code-verifier if it exists and has a value (needed for PKCE flow continuation)
-        const codeVerifierCookie = allCookies.find(c => 
-          c.name.includes('code-verifier') && 
-          c.name.includes('supabase') &&
-          c.value && 
-          c.value.length > 0
-        );
-        
-        // Only include cookies that have values (skip empty cookies)
-        const essentialCookies = [sessionCookie, codeVerifierCookie]
-          .filter((c): c is NonNullable<typeof c> => 
-            c !== undefined && 
-            c !== null && 
-            c.value && 
-            c.value.length > 0
-          ) as typeof allCookies;
+        // Only include the session cookie (skip code-verifier to minimize header size)
+        const essentialCookies = sessionCookie && sessionCookie.value && sessionCookie.value.length > 0
+          ? [sessionCookie]
+          : [];
         
         console.log('🍪 [AUTH_CALLBACK] Filtering cookies to copy (minimizing header size):', {
           totalCookies: allCookies.length,
