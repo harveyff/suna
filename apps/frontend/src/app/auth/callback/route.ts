@@ -61,16 +61,97 @@ export async function GET(request: NextRequest) {
 
   const supabase = await createClient()
 
-  // Handle token-based verification (email confirmation, etc.)
+  // Handle token-based verification (magic link PKCE token)
   // Supabase sends these to the redirect URL for processing
-  if (token && type) {
-    // For token-based flows, redirect to auth page that can handle the verification client-side
-    const verifyUrl = new URL(`${baseUrl}/auth`)
-    verifyUrl.searchParams.set('token', token)
-    verifyUrl.searchParams.set('type', type)
-    if (termsAccepted) verifyUrl.searchParams.set('terms_accepted', 'true')
+  if (token) {
+    // Default to 'magiclink' if type is not provided (for PKCE tokens)
+    const finalType = type || 'magiclink';
     
-    return NextResponse.redirect(verifyUrl)
+    console.log('🔍 Callback route processing token:', {
+      token: token.substring(0, 20) + '...',
+      type: finalType,
+      hasReturnUrl: !!next,
+    });
+
+    try {
+      // For PKCE magic link tokens, we need to exchange them for a session
+      // Try to verify the token and create a session
+      const { data, error } = await supabase.auth.verifyOtp({
+        token_hash: token,
+        type: finalType as any,
+      })
+
+      if (error) {
+        console.error('❌ Error verifying token:', error)
+        
+        // Check if the error is due to expired/invalid link
+        const isExpired = 
+          error.message?.toLowerCase().includes('expired') ||
+          error.message?.toLowerCase().includes('invalid') ||
+          error.status === 400 ||
+          error.code === 'expired_token' ||
+          error.code === 'token_expired' ||
+          error.code === 'otp_expired'
+        
+        if (isExpired) {
+          // Redirect to auth page with expired state to show resend form
+          const expiredUrl = new URL(`${baseUrl}/auth`)
+          expiredUrl.searchParams.set('expired', 'true')
+          if (email) expiredUrl.searchParams.set('email', email)
+          if (next) expiredUrl.searchParams.set('returnUrl', next)
+
+          console.log('🔄 Token expired, redirecting to auth page with expired state')
+          return NextResponse.redirect(expiredUrl)
+        }
+        
+        return NextResponse.redirect(`${baseUrl}/auth?error=${encodeURIComponent(error.message)}`)
+      }
+
+      // Token verified successfully, redirect to dashboard
+      if (data.user) {
+        // Determine if this is a new user (for analytics tracking)
+        const createdAt = new Date(data.user.created_at).getTime();
+        const now = Date.now();
+        const isNewUser = (now - createdAt) < 60000; // Created within last 60 seconds
+        const authEvent = isNewUser ? 'signup' : 'login';
+        const authMethod = 'email';
+
+        if (termsAccepted) {
+          const currentMetadata = data.user.user_metadata || {};
+          if (!currentMetadata.terms_accepted_at) {
+            try {
+              await supabase.auth.updateUser({
+                data: {
+                  ...currentMetadata,
+                  terms_accepted_at: new Date().toISOString(),
+                },
+              });
+              console.log('✅ Terms acceptance date saved to user metadata');
+            } catch (updateError) {
+              console.warn('⚠️ Failed to save terms acceptance:', updateError);
+            }
+          }
+        }
+
+        // Redirect to dashboard with auth tracking params
+        const redirectUrl = new URL(`${baseUrl}${next}`)
+        redirectUrl.searchParams.set('auth_event', authEvent)
+        redirectUrl.searchParams.set('auth_method', authMethod)
+        
+        console.log('✅ Token verified successfully, redirecting to:', redirectUrl.toString())
+        return NextResponse.redirect(redirectUrl)
+      }
+    } catch (error: any) {
+      console.error('❌ Unexpected error verifying token:', error)
+      // Fallback: redirect to auth page with token for client-side handling
+      const verifyUrl = new URL(`${baseUrl}/auth`)
+      verifyUrl.searchParams.set('token', token)
+      verifyUrl.searchParams.set('type', finalType)
+      if (termsAccepted) verifyUrl.searchParams.set('terms_accepted', 'true')
+      if (next) verifyUrl.searchParams.set('returnUrl', next)
+      
+      return NextResponse.redirect(verifyUrl)
+    }
   }
 
   // Handle code exchange (OAuth, magic link)

@@ -50,6 +50,43 @@ function LoginContent() {
 
   const { wasLastMethod: wasEmailLastMethod, markAsUsed: markEmailAsUsed } = useAuthMethodTracking('email');
 
+  // Handle magic link token verification
+  const token = searchParams.get('token');
+  const tokenType = searchParams.get('type');
+  const tokenVerified = useRef(false);
+
+  useEffect(() => {
+    // Handle token-based magic link verification
+    console.log('🔍 Auth page useEffect triggered:', {
+      token: token ? 'present' : 'missing',
+      tokenType: tokenType || 'missing',
+      tokenVerified: tokenVerified.current,
+      isLoading,
+      user: user ? 'present' : 'missing',
+    });
+
+    if (token && !tokenVerified.current && !isLoading && !user) {
+      // If tokenType is missing, default to 'magiclink' for PKCE tokens
+      const finalTokenType = tokenType || 'magiclink';
+      
+      tokenVerified.current = true;
+      
+      // Redirect to callback route which handles token verification server-side
+      const callbackUrl = new URL('/auth/callback', window.location.origin);
+      callbackUrl.searchParams.set('token', token);
+      callbackUrl.searchParams.set('type', finalTokenType);
+      if (returnUrl) callbackUrl.searchParams.set('returnUrl', returnUrl);
+      
+      console.log('🔗 Magic link token detected, redirecting to callback:', callbackUrl.toString());
+      window.location.href = callbackUrl.toString();
+      return;
+    } else if (token && tokenVerified.current) {
+      console.log('⚠️ Token already processed, skipping redirect');
+    } else if (token && (isLoading || user)) {
+      console.log('⚠️ Token present but waiting for auth state:', { isLoading, hasUser: !!user });
+    }
+  }, [token, tokenType, isLoading, user, returnUrl]);
+
   useEffect(() => {
     // Redirect to dashboard if user is logged in
     if (!isLoading && user) {
