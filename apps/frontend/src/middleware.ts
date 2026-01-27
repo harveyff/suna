@@ -221,13 +221,44 @@ export async function middleware(request: NextRequest) {
   let user: { id: string; user_metadata?: { locale?: string } } | null = null;
   let authError: Error | null = null;
   
+  // Log cookies before auth check for debugging
+  const allCookies = request.cookies.getAll();
+  const authCookies = allCookies.filter(c => 
+    c.name.includes('supabase') || 
+    c.name.includes('auth') || 
+    c.name === 'sb-supabase-kong-auth-token'
+  );
+  
+  console.log('🔍 [Middleware] Auth check:', {
+    pathname,
+    totalCookies: allCookies.length,
+    authCookiesCount: authCookies.length,
+    authCookieNames: authCookies.map(c => c.name),
+    hasSessionCookie: authCookies.some(c => c.name === 'sb-supabase-kong-auth-token'),
+    timestamp: new Date().toISOString(),
+  });
+  
   try {
     const { data: { user: fetchedUser }, error: fetchedError } = await supabase.auth.getUser();
     user = fetchedUser;
     authError = fetchedError as Error | null;
+    
+    console.log('🔍 [Middleware] getUser result:', {
+      pathname,
+      hasUser: !!user,
+      userId: user?.id,
+      hasError: !!authError,
+      errorMessage: authError?.message,
+      timestamp: new Date().toISOString(),
+    });
   } catch (error) {
     // User might not be authenticated, continue
     authError = error as Error;
+    console.log('🔍 [Middleware] getUser exception:', {
+      pathname,
+      errorMessage: authError?.message,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // Auto-redirect based on geo-detection for marketing pages

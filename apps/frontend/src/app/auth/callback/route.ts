@@ -553,12 +553,22 @@ export async function GET(request: NextRequest) {
           (c.name.includes('supabase') && c.name.includes('auth-token') && !c.name.includes('code-verifier'))
         );
         
-        // Also include code-verifier if it exists (needed for PKCE flow continuation)
+        // Also include code-verifier if it exists and has a value (needed for PKCE flow continuation)
         const codeVerifierCookie = allCookies.find(c => 
-          c.name.includes('code-verifier') && c.name.includes('supabase')
+          c.name.includes('code-verifier') && 
+          c.name.includes('supabase') &&
+          c.value && 
+          c.value.length > 0
         );
         
-        const essentialCookies = [sessionCookie, codeVerifierCookie].filter(Boolean) as typeof allCookies;
+        // Only include cookies that have values (skip empty cookies)
+        const essentialCookies = [sessionCookie, codeVerifierCookie]
+          .filter((c): c is NonNullable<typeof c> => 
+            c !== undefined && 
+            c !== null && 
+            c.value && 
+            c.value.length > 0
+          ) as typeof allCookies;
         
         console.log('🍪 [AUTH_CALLBACK] Filtering cookies to copy (minimizing header size):', {
           totalCookies: allCookies.length,
