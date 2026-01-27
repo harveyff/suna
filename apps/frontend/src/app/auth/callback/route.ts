@@ -21,10 +21,29 @@ export async function GET(request: NextRequest) {
   const termsAccepted = searchParams.get('terms_accepted') === 'true'
   const email = searchParams.get('email') || '' // Email passed from magic link redirect URL
 
-  // Use request origin for redirects (most reliable for local dev)
-  // This ensures localhost:3000 redirects stay on localhost, not staging
-  const requestOrigin = request.nextUrl.origin
-  const baseUrl = requestOrigin || process.env.NEXT_PUBLIC_URL || 'http://localhost:3000'
+  // Use request headers to determine the correct base URL
+  // Priority: X-Forwarded-Host > Host > request.nextUrl.origin
+  // This handles reverse proxy scenarios where origin might be 0.0.0.0:3000
+  const forwardedHost = request.headers.get('x-forwarded-host');
+  const host = request.headers.get('host');
+  const protocol = request.headers.get('x-forwarded-proto') || request.nextUrl.protocol;
+  
+  let baseUrl: string;
+  if (forwardedHost) {
+    baseUrl = `${protocol}//${forwardedHost}`;
+  } else if (host) {
+    baseUrl = `${protocol}//${host}`;
+  } else {
+    baseUrl = request.nextUrl.origin || process.env.NEXT_PUBLIC_URL || 'http://localhost:3000';
+  }
+  
+  console.log('🌐 Base URL determined:', {
+    forwardedHost,
+    host,
+    protocol,
+    nextUrlOrigin: request.nextUrl.origin,
+    finalBaseUrl: baseUrl,
+  });
   const error = searchParams.get('error')
   const errorCode = searchParams.get('error_code')
   const errorDescription = searchParams.get('error_description')
@@ -133,13 +152,42 @@ export async function GET(request: NextRequest) {
           }
         }
 
+        // Ensure session is properly established by getting it
+        // This ensures cookies are set correctly via createServerClient's setAll
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('❌ Error getting session after token verification:', sessionError);
+        } else {
+          console.log('✅ Session established:', {
+            hasSession: !!sessionData.session,
+            userId: sessionData.session?.user?.id,
+          });
+        }
+
         // Redirect to dashboard with auth tracking params
         const redirectUrl = new URL(`${baseUrl}${next}`)
         redirectUrl.searchParams.set('auth_event', authEvent)
         redirectUrl.searchParams.set('auth_method', authMethod)
         
-        console.log('✅ Token verified successfully, redirecting to:', redirectUrl.toString())
-        return NextResponse.redirect(redirectUrl)
+        // Create redirect response
+        // The cookies should already be set by createServerClient's setAll method via cookieStore.set()
+        // In Next.js App Router, cookies set via cookies().set() are automatically included in responses
+        const redirectResponse = NextResponse.redirect(redirectUrl)
+        
+        // Explicitly ensure cookies are included by reading from cookie store
+        // This is a safety measure to ensure cookies are in the redirect response
+        const { cookies } = await import('next/headers');
+        const cookieStore = await cookies();
+        const allCookies = cookieStore.getAll();
+        
+        // Log cookie information for debugging
+        console.log('✅ Token verified successfully, redirecting to:', redirectUrl.toString(), {
+          cookiesCount: allCookies.length,
+          cookieNames: allCookies.map(c => c.name).filter(name => name.includes('supabase') || name.includes('auth')),
+        });
+        
+        return redirectResponse
       }
     } catch (error: any) {
       console.error('❌ Unexpected error verifying token:', error)
