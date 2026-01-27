@@ -47,14 +47,12 @@ export async function GET(request: NextRequest) {
     console.error('❌ Auth callback error:', error, errorCode, errorDescription)
 
     // Check if the error is due to expired/invalid link
+    // Only check explicit error codes, not generic error messages
     const isExpiredOrInvalid =
       errorCode === 'otp_expired' ||
       errorCode === 'expired_token' ||
       errorCode === 'token_expired' ||
-      error?.toLowerCase().includes('expired') ||
-      error?.toLowerCase().includes('invalid') ||
-      errorDescription?.toLowerCase().includes('expired') ||
-      errorDescription?.toLowerCase().includes('invalid')
+      (errorCode === 'invalid_grant' && (errorDescription?.toLowerCase().includes('expired') || error?.toLowerCase().includes('expired')))
 
     if (isExpiredOrInvalid) {
       // Redirect to auth page with expired state to show resend form
@@ -102,29 +100,27 @@ export async function GET(request: NextRequest) {
         if (error) {
           console.error('❌ PKCE token verification failed:', error)
           
-          // Check if expired/invalid
-          // Only mark as expired if explicitly stated in error code or message
-          // Don't use error.status === 400 as it's too broad (many errors are 400)
+          // Handle flow_state_not_found separately - it's not necessarily expired, just needs OTP entry
+          // This allows users to enter OTP code even if PKCE flow state is lost
+          if (error.code === 'flow_state_not_found' && extractedEmail) {
+            console.log('🔄 PKCE flow state not found, redirecting to /auth for OTP entry:', { email: extractedEmail })
+            const authUrl = new URL(`${baseUrl}/auth`)
+            authUrl.searchParams.set('email', extractedEmail)
+            authUrl.searchParams.set('expired', 'true')
+            authUrl.searchParams.set('pkce_expired', 'true') // Flag to skip "link expired" message
+            if (next) authUrl.searchParams.set('returnUrl', next)
+            return NextResponse.redirect(authUrl)
+          }
+          
+          // Check if expired/invalid - only mark as expired if explicitly stated in error code
           const isExpired = 
             error.code === 'expired_token' ||
             error.code === 'token_expired' ||
             error.code === 'otp_expired' ||
-            error.code === 'flow_state_not_found' || // PKCE flow expired
-            (error.message?.toLowerCase().includes('expired') && !error.message?.toLowerCase().includes('not expired')) ||
-            (error.message?.toLowerCase().includes('invalid') && error.message?.toLowerCase().includes('token'))
+            (error.code === 'invalid_grant' && error.message?.toLowerCase().includes('expired'))
           
           if (isExpired) {
-            // If flow state not found and we have email, redirect to /auth for OTP entry
-            if (error.code === 'flow_state_not_found' && extractedEmail) {
-              console.log('🔄 PKCE flow expired, redirecting to /auth for OTP entry:', { email: extractedEmail })
-              const authUrl = new URL(`${baseUrl}/auth`)
-              authUrl.searchParams.set('email', extractedEmail)
-              authUrl.searchParams.set('expired', 'true')
-              if (next) authUrl.searchParams.set('returnUrl', next)
-              return NextResponse.redirect(authUrl)
-            }
-            
-            // Otherwise redirect to auth page with expired state
+            // Redirect to auth page with expired state
             const expiredUrl = new URL(`${baseUrl}/auth`)
             expiredUrl.searchParams.set('expired', 'true')
             if (extractedEmail) expiredUrl.searchParams.set('email', extractedEmail)
@@ -132,10 +128,11 @@ export async function GET(request: NextRequest) {
             return NextResponse.redirect(expiredUrl)
           }
           
-          // For other errors, redirect to auth page with error
+          // For other errors, redirect to auth page with error (but don't mark as expired)
           const errorUrl = new URL(`${baseUrl}/auth`)
           errorUrl.searchParams.set('error', error.message || 'verification_failed')
           if (extractedEmail) errorUrl.searchParams.set('email', extractedEmail)
+          if (next) errorUrl.searchParams.set('returnUrl', next)
           return NextResponse.redirect(errorUrl)
         }
         
@@ -195,13 +192,12 @@ export async function GET(request: NextRequest) {
         console.error('❌ Error exchanging code for session:', error)
         
         // Check if the error is due to expired/invalid link
+        // Only check explicit error codes, not generic error messages or status codes
         const isExpired = 
-          error.message?.toLowerCase().includes('expired') ||
-          error.message?.toLowerCase().includes('invalid') ||
-          error.status === 400 ||
           error.code === 'expired_token' ||
           error.code === 'token_expired' ||
-          error.code === 'otp_expired'
+          error.code === 'otp_expired' ||
+          (error.code === 'invalid_grant' && error.message?.toLowerCase().includes('expired'))
         
         if (isExpired) {
           // Redirect to auth page with expired state to show resend form

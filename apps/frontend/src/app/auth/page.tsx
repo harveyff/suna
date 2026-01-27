@@ -36,6 +36,7 @@ function LoginContent() {
   const returnUrl = searchParams.get('returnUrl') || searchParams.get('redirect');
   const message = searchParams.get('message');
   const isExpired = searchParams.get('expired') === 'true';
+  const isPkceExpired = searchParams.get('pkce_expired') === 'true';
   const expiredEmail = searchParams.get('email') || '';
   const referralCodeParam = searchParams.get('ref') || '';
   const t = useTranslations('auth');
@@ -337,10 +338,10 @@ function LoginContent() {
 
                 <div className="text-center space-y-2">
                   <h1 className="text-[28px] sm:text-[32px] font-normal tracking-tight text-foreground leading-none">
-                    Link expired
+                    {isPkceExpired ? 'Sending verification code' : 'Link expired'}
                   </h1>
                   <p className="text-[15px] text-foreground/50">
-                    Sending a fresh code to your email...
+                    {isPkceExpired ? 'Sending a code to your email...' : 'Sending a fresh code to your email...'}
                   </p>
                 </div>
               </div>
