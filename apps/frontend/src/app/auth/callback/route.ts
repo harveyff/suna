@@ -27,6 +27,16 @@ export async function GET(request: NextRequest) {
     },
     timestamp: new Date().toISOString(),
   });
+  
+  // Log all request headers for debugging
+  const requestHeaders: Record<string, string> = {};
+  request.headers.forEach((value, key) => {
+    requestHeaders[key] = value;
+  });
+  console.log('🔍 [AUTH_CALLBACK] All request headers:', {
+    headers: requestHeaders,
+    timestamp: new Date().toISOString(),
+  });
 
   const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
@@ -165,41 +175,95 @@ export async function GET(request: NextRequest) {
   
   // If user already authenticated, redirect immediately without processing token
   // This prevents "token already used" errors when browser retries callback
+  console.log('🔍 [AUTH_CALLBACK] Checking if user already authenticated:', {
+    hasExistingSession: !!existingSession,
+    hasUser: !!existingSession?.user,
+    userId: existingSession?.user?.id,
+    sessionExpiresAt: existingSession?.expires_at,
+    timestamp: new Date().toISOString(),
+  });
+  
   if (existingSession && existingSession.user) {
     const redirectUrl = new URL(`${baseUrl}${next}`)
     console.log('✅ [AUTH_CALLBACK] User already authenticated, skipping token verification:', {
       userId: existingSession.user.id,
       redirectUrl: redirectUrl.toString(),
       hasSession: true,
+      baseUrl,
+      next,
       timestamp: new Date().toISOString(),
     });
     
     const redirectStartTime = Date.now();
-    const redirectResponse = NextResponse.redirect(redirectUrl, { status: 307 })
     
-    // Copy ALL cookies to redirect response to ensure session is preserved
-    allCookies.forEach((cookie) => {
-      redirectResponse.cookies.set(cookie.name, cookie.value);
+    // Use HTML redirect instead of 307 to avoid large Set-Cookie header issues
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Redirecting...</title>
+  <meta http-equiv="refresh" content="0;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
+</head>
+<body>
+  <script>
+    window.location.href = ${JSON.stringify(redirectUrl.toString())};
+  </script>
+  <p>Redirecting to <a href="${redirectUrl.toString().replace(/"/g, '&quot;')}">${redirectUrl.toString().replace(/"/g, '&quot;')}</a>...</p>
+</body>
+</html>`;
+    
+    console.log('🔍 [AUTH_CALLBACK] Creating HTML redirect response for existing session:', {
+      htmlLength: html.length,
+      redirectUrl: redirectUrl.toString(),
+      timestamp: new Date().toISOString(),
     });
     
-    redirectResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
-    redirectResponse.headers.set('Pragma', 'no-cache');
-    redirectResponse.headers.set('Expires', '0');
+    const htmlResponse = new NextResponse(html, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
+      },
+    });
+    
+    // Log cookies that will be included in response
+    const responseCookies = htmlResponse.cookies.getAll();
+    console.log('🔍 [AUTH_CALLBACK] Cookies in HTML response (existing session):', {
+      cookiesCount: responseCookies.length,
+      cookieNames: responseCookies.map(c => c.name),
+      cookieSizes: responseCookies.map(c => ({
+        name: c.name,
+        valueLength: c.value.length,
+      })),
+      timestamp: new Date().toISOString(),
+    });
+    
+    // Cookies are already set via cookies().set() in createClient() above
+    // They will be automatically included in this HTML response
     
     const redirectDuration = Date.now() - redirectStartTime;
     const totalDuration = Date.now() - requestStartTime;
     
-    console.log('✅ [AUTH_CALLBACK] Redirect response created for existing session:', {
-      status: 307,
+    console.log('✅ [AUTH_CALLBACK] HTML redirect response created for existing session:', {
+      status: 200,
       redirectUrl: redirectUrl.toString(),
-      cookiesInResponse: redirectResponse.cookies.getAll().map(c => c.name),
+      htmlLength: html.length,
+      cookiesInResponse: responseCookies.length,
       redirectDuration: `${redirectDuration}ms`,
       totalDuration: `${totalDuration}ms`,
+      responseHeaders: Object.fromEntries(htmlResponse.headers.entries()),
       timestamp: new Date().toISOString(),
     });
     
-    return redirectResponse
+    return htmlResponse
   }
+  
+  console.log('🔍 [AUTH_CALLBACK] User not authenticated, proceeding with token verification:', {
+    hasExistingSession: !!existingSession,
+    hasUser: !!existingSession?.user,
+    timestamp: new Date().toISOString(),
+  });
   
   // If we have auth cookies but no session, there might be a cookie issue
   // Still proceed with token verification, but log the discrepancy
@@ -354,39 +418,69 @@ export async function GET(request: NextRequest) {
             console.log('✅ [AUTH_CALLBACK] Token expired but user already authenticated, redirecting to dashboard:', {
               redirectUrl: redirectUrl.toString(),
               userId: checkSession.user.id,
+              baseUrl,
+              next,
               timestamp: new Date().toISOString(),
             });
             
-            const redirectResponse = NextResponse.redirect(redirectUrl, { status: 307 })
+            // Use HTML redirect instead of 307 to avoid large Set-Cookie header issues
+            const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Redirecting...</title>
+  <meta http-equiv="refresh" content="0;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
+</head>
+<body>
+  <script>
+    window.location.href = ${JSON.stringify(redirectUrl.toString())};
+  </script>
+  <p>Redirecting to <a href="${redirectUrl.toString().replace(/"/g, '&quot;')}">${redirectUrl.toString().replace(/"/g, '&quot;')}</a>...</p>
+</body>
+</html>`;
             
-            // Copy existing cookies to redirect response
-            const { cookies } = await import('next/headers');
-            const cookieStore = await cookies();
-            const allCookies = cookieStore.getAll();
-            
-            console.log('🔍 [AUTH_CALLBACK] Copying cookies for expired token redirect:', {
-              cookiesCount: allCookies.length,
-              cookieNames: allCookies.map(c => c.name),
+            console.log('🔍 [AUTH_CALLBACK] Creating HTML redirect response for expired token:', {
+              htmlLength: html.length,
+              redirectUrl: redirectUrl.toString(),
               timestamp: new Date().toISOString(),
             });
             
-            allCookies.forEach((cookie) => {
-              redirectResponse.cookies.set(cookie.name, cookie.value);
+            const htmlResponse = new NextResponse(html, {
+              status: 200,
+              headers: {
+                'Content-Type': 'text/html; charset=utf-8',
+                'Cache-Control': 'no-store, no-cache, must-revalidate',
+                'Pragma': 'no-cache',
+              },
             });
             
-            redirectResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
-            redirectResponse.headers.set('Pragma', 'no-cache');
-            redirectResponse.headers.set('Expires', '0');
+            // Log cookies that will be included in response
+            const responseCookies = htmlResponse.cookies.getAll();
+            console.log('🔍 [AUTH_CALLBACK] Cookies in HTML response (expired token):', {
+              cookiesCount: responseCookies.length,
+              cookieNames: responseCookies.map(c => c.name),
+              cookieSizes: responseCookies.map(c => ({
+                name: c.name,
+                valueLength: c.value.length,
+              })),
+              timestamp: new Date().toISOString(),
+            });
+            
+            // Cookies are already set via cookies().set() in createClient() above
+            // They will be automatically included in this HTML response
             
             const totalDuration = Date.now() - requestStartTime;
-            console.log('✅ [AUTH_CALLBACK] Redirect response created for expired token:', {
+            console.log('✅ [AUTH_CALLBACK] HTML redirect response created for expired token:', {
+              status: 200,
               redirectUrl: redirectUrl.toString(),
-              cookiesInResponse: redirectResponse.cookies.getAll().map(c => c.name),
+              htmlLength: html.length,
+              cookiesInResponse: responseCookies.length,
               totalDuration: `${totalDuration}ms`,
+              responseHeaders: Object.fromEntries(htmlResponse.headers.entries()),
               timestamp: new Date().toISOString(),
             });
             
-            return redirectResponse
+            return htmlResponse
           }
           
           // Token expired and no session - redirect to auth page with expired state
@@ -506,6 +600,8 @@ export async function GET(request: NextRequest) {
           redirectUrl: redirectUrl.toString(),
           authEvent,
           authMethod,
+          baseUrl,
+          next,
           timestamp: new Date().toISOString(),
         });
         
@@ -523,9 +619,12 @@ export async function GET(request: NextRequest) {
         );
         
         console.log('🍪 [AUTH_CALLBACK] Preparing HTML redirect response:', {
+          totalCookiesAvailable: allCookies.length,
+          allCookieNames: allCookies.map(c => c.name),
           hasSessionCookie: !!sessionCookie,
           sessionCookieName: sessionCookie?.name,
           sessionCookieLength: sessionCookie?.value?.length || 0,
+          sessionCookieValuePreview: sessionCookie?.value?.substring(0, 50) + '...',
           redirectUrl: redirectUrl.toString(),
           timestamp: new Date().toISOString(),
         });
@@ -554,6 +653,12 @@ export async function GET(request: NextRequest) {
         // Create response with HTML content
         // Cookies are already set via cookies().set() in createClient() above,
         // so they'll be automatically included in this response
+        console.log('🔍 [AUTH_CALLBACK] Creating HTML response object:', {
+          htmlLength: html.length,
+          redirectUrl: redirectUrl.toString(),
+          timestamp: new Date().toISOString(),
+        });
+        
         const htmlResponse = new NextResponse(html, {
           status: 200,
           headers: {
@@ -563,17 +668,42 @@ export async function GET(request: NextRequest) {
           },
         });
         
+        // Log cookies that will be included in response
+        const responseCookies = htmlResponse.cookies.getAll();
+        console.log('🔍 [AUTH_CALLBACK] Cookies in HTML response (token verified):', {
+          cookiesCount: responseCookies.length,
+          cookieNames: responseCookies.map(c => c.name),
+          cookieSizes: responseCookies.map(c => ({
+            name: c.name,
+            valueLength: c.value.length,
+            valuePreview: c.value.substring(0, 50) + '...',
+          })),
+          totalCookieSize: responseCookies.reduce((sum, c) => sum + c.value.length, 0),
+          timestamp: new Date().toISOString(),
+        });
+        
+        // Log response headers
+        const responseHeaders = Object.fromEntries(htmlResponse.headers.entries());
+        console.log('🔍 [AUTH_CALLBACK] Response headers:', {
+          headers: responseHeaders,
+          headerCount: Object.keys(responseHeaders).length,
+          timestamp: new Date().toISOString(),
+        });
+        
         // Cookies are already set via cookies().set() in createClient() above
         // They will be automatically included in this HTML response
-        // This avoids the large Set-Cookie header in redirect response
         
         const totalDuration = Date.now() - requestStartTime;
         
         console.log('✅ [AUTH_CALLBACK] Token verified successfully, returning HTML redirect:', {
+          status: 200,
           redirectUrl: redirectUrl.toString(),
+          htmlLength: html.length,
           cookiesCount: allCookies.length,
           cookieNames: allCookies.map(c => c.name).filter(name => name.includes('supabase') || name.includes('auth')),
+          cookiesInResponse: responseCookies.length,
           hasSessionCookie: !!sessionCookie,
+          sessionCookieSize: sessionCookie?.value?.length || 0,
           durations: {
             sessionGet: `${sessionGetDuration}ms`,
             cookieGet: `${cookieGetDuration}ms`,
