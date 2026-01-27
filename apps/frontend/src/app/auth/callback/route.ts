@@ -227,31 +227,40 @@ export async function GET(request: NextRequest) {
       },
     });
     
-    // CRITICAL: Manually copy cookies to HTML response
+    // CRITICAL: Manually copy ONLY the essential session cookie to HTML response
     // In Next.js Route Handlers, cookies().set() doesn't automatically include cookies
     // in NextResponse() responses. We must manually add them.
-    console.log('🔍 [AUTH_CALLBACK] Copying cookies to HTML response (existing session):', {
-      cookiesToCopy: allCookies.length,
-      cookieNames: allCookies.map(c => c.name),
+    // But we only copy the session cookie to minimize header size and prevent 502 errors
+    const sessionCookieForResponse = allCookies.find(c => 
+      c.name === 'sb-supabase-kong-auth-token' ||
+      (c.name.includes('supabase') && c.name.includes('auth-token') && !c.name.includes('code-verifier'))
+    );
+    
+    console.log('🔍 [AUTH_CALLBACK] Copying session cookie to HTML response (existing session):', {
+      hasSessionCookie: !!sessionCookieForResponse,
+      sessionCookieName: sessionCookieForResponse?.name,
+      sessionCookieLength: sessionCookieForResponse?.value?.length || 0,
+      totalCookiesAvailable: allCookies.length,
       timestamp: new Date().toISOString(),
     });
     
-    allCookies.forEach((cookie) => {
+    if (sessionCookieForResponse && sessionCookieForResponse.value && sessionCookieForResponse.value.length > 0) {
       try {
-        htmlResponse.cookies.set(cookie.name, cookie.value, {
+        htmlResponse.cookies.set(sessionCookieForResponse.name, sessionCookieForResponse.value, {
           path: '/',
           sameSite: 'lax' as const,
-          httpOnly: cookie.name.includes('auth-token') && !cookie.name.includes('code-verifier'),
+          httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
         });
+        console.log('✅ [AUTH_CALLBACK] Session cookie copied to HTML response');
       } catch (error) {
-        console.error(`❌ [AUTH_CALLBACK] Failed to copy cookie ${cookie.name}:`, {
+        console.error(`❌ [AUTH_CALLBACK] Failed to copy session cookie:`, {
           error: error instanceof Error ? error.message : String(error),
-          cookieName: cookie.name,
+          cookieName: sessionCookieForResponse.name,
           timestamp: new Date().toISOString(),
         });
       }
-    });
+    }
     
     // Log cookies that are now included in response
     const responseCookies = htmlResponse.cookies.getAll();
@@ -480,35 +489,44 @@ export async function GET(request: NextRequest) {
               },
             });
             
-            // CRITICAL: Manually copy cookies to HTML response
+            // CRITICAL: Manually copy ONLY the essential session cookie to HTML response
             // In Next.js Route Handlers, cookies().set() doesn't automatically include cookies
             // in NextResponse() responses. We must manually add them.
+            // But we only copy the session cookie to minimize header size and prevent 502 errors
             const { cookies: expiredCookies } = await import('next/headers');
             const expiredCookieStore = await expiredCookies();
             const expiredAllCookies = expiredCookieStore.getAll();
             
-            console.log('🔍 [AUTH_CALLBACK] Copying cookies to HTML response (expired token):', {
-              cookiesToCopy: expiredAllCookies.length,
-              cookieNames: expiredAllCookies.map(c => c.name),
+            const expiredSessionCookie = expiredAllCookies.find(c => 
+              c.name === 'sb-supabase-kong-auth-token' ||
+              (c.name.includes('supabase') && c.name.includes('auth-token') && !c.name.includes('code-verifier'))
+            );
+            
+            console.log('🔍 [AUTH_CALLBACK] Copying session cookie to HTML response (expired token):', {
+              hasSessionCookie: !!expiredSessionCookie,
+              sessionCookieName: expiredSessionCookie?.name,
+              sessionCookieLength: expiredSessionCookie?.value?.length || 0,
+              totalCookiesAvailable: expiredAllCookies.length,
               timestamp: new Date().toISOString(),
             });
             
-            expiredAllCookies.forEach((cookie) => {
+            if (expiredSessionCookie && expiredSessionCookie.value && expiredSessionCookie.value.length > 0) {
               try {
-                htmlResponse.cookies.set(cookie.name, cookie.value, {
+                htmlResponse.cookies.set(expiredSessionCookie.name, expiredSessionCookie.value, {
                   path: '/',
                   sameSite: 'lax' as const,
-                  httpOnly: cookie.name.includes('auth-token') && !cookie.name.includes('code-verifier'),
+                  httpOnly: true,
                   secure: process.env.NODE_ENV === 'production',
                 });
+                console.log('✅ [AUTH_CALLBACK] Session cookie copied to HTML response');
               } catch (error) {
-                console.error(`❌ [AUTH_CALLBACK] Failed to copy cookie ${cookie.name}:`, {
+                console.error(`❌ [AUTH_CALLBACK] Failed to copy session cookie:`, {
                   error: error instanceof Error ? error.message : String(error),
-                  cookieName: cookie.name,
+                  cookieName: expiredSessionCookie.name,
                   timestamp: new Date().toISOString(),
                 });
               }
-            });
+            }
             
             // Log cookies that are now included in response
             const responseCookies = htmlResponse.cookies.getAll();
@@ -721,31 +739,35 @@ export async function GET(request: NextRequest) {
           },
         });
         
-        // CRITICAL: Manually copy cookies to HTML response
+        // CRITICAL: Manually copy ONLY the essential session cookie to HTML response
         // In Next.js Route Handlers, cookies().set() doesn't automatically include cookies
         // in NextResponse() responses. We must manually add them.
-        console.log('🔍 [AUTH_CALLBACK] Copying cookies to HTML response (token verified):', {
-          cookiesToCopy: allCookies.length,
-          cookieNames: allCookies.map(c => c.name),
+        // But we only copy the session cookie to minimize header size and prevent 502 errors
+        console.log('🔍 [AUTH_CALLBACK] Copying session cookie to HTML response (token verified):', {
+          hasSessionCookie: !!sessionCookie,
+          sessionCookieName: sessionCookie?.name,
+          sessionCookieLength: sessionCookie?.value?.length || 0,
+          totalCookiesAvailable: allCookies.length,
           timestamp: new Date().toISOString(),
         });
         
-        allCookies.forEach((cookie) => {
+        if (sessionCookie && sessionCookie.value && sessionCookie.value.length > 0) {
           try {
-            htmlResponse.cookies.set(cookie.name, cookie.value, {
+            htmlResponse.cookies.set(sessionCookie.name, sessionCookie.value, {
               path: '/',
               sameSite: 'lax' as const,
-              httpOnly: cookie.name.includes('auth-token') && !cookie.name.includes('code-verifier'),
+              httpOnly: true,
               secure: process.env.NODE_ENV === 'production',
             });
+            console.log('✅ [AUTH_CALLBACK] Session cookie copied to HTML response');
           } catch (error) {
-            console.error(`❌ [AUTH_CALLBACK] Failed to copy cookie ${cookie.name}:`, {
+            console.error(`❌ [AUTH_CALLBACK] Failed to copy session cookie:`, {
               error: error instanceof Error ? error.message : String(error),
-              cookieName: cookie.name,
+              cookieName: sessionCookie.name,
               timestamp: new Date().toISOString(),
             });
           }
-        });
+        }
         
         // Log cookies that are now included in response
         const responseCookies = htmlResponse.cookies.getAll();
