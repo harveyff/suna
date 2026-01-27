@@ -33,7 +33,33 @@ function LoginContent() {
   const searchParams = useSearchParams();
   const { user, isLoading } = useAuth();
   const mode = searchParams.get('mode');
-  const returnUrl = searchParams.get('returnUrl') || searchParams.get('redirect');
+  const redirectToParam = searchParams.get('redirect_to');
+  const returnUrlParam = searchParams.get('returnUrl') || searchParams.get('redirect');
+  
+  // Extract returnUrl from redirect_to if it's a callback URL with returnUrl param
+  let returnUrl = returnUrlParam;
+  if (!returnUrl && redirectToParam) {
+    try {
+      const redirectToUrl = new URL(redirectToParam);
+      const returnUrlFromRedirectTo = redirectToUrl.searchParams.get('returnUrl');
+      if (returnUrlFromRedirectTo) {
+        returnUrl = returnUrlFromRedirectTo;
+        console.log('🔍 [Auth Page] Extracted returnUrl from redirect_to:', {
+          redirectTo: redirectToParam,
+          extractedReturnUrl: returnUrl,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      // redirect_to might not be a valid URL, ignore
+      console.warn('⚠️ [Auth Page] Failed to parse redirect_to:', {
+        redirectTo: redirectToParam,
+        error: e instanceof Error ? e.message : String(e),
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+  
   const message = searchParams.get('message');
   const isExpired = searchParams.get('expired') === 'true';
   const isPkceExpired = searchParams.get('pkce_expired') === 'true';
@@ -54,7 +80,16 @@ function LoginContent() {
   useEffect(() => {
     // Redirect to dashboard if user is logged in
     if (!isLoading && user) {
-      router.replace(returnUrl || '/dashboard');
+      const finalReturnUrl = returnUrl || '/dashboard';
+      console.log('🔄 [Auth Page] User already authenticated, redirecting:', {
+        userId: user.id,
+        email: user.email,
+        returnUrl,
+        finalReturnUrl,
+        currentPath: typeof window !== 'undefined' ? window.location.pathname : 'unknown',
+        timestamp: new Date().toISOString(),
+      });
+      router.replace(finalReturnUrl);
     }
   }, [user, isLoading, router, returnUrl]);
 

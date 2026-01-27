@@ -167,12 +167,77 @@ export async function middleware(request: NextRequest) {
           
           // Preserve non-auth query parameters (like redirect_to, returnUrl, email, etc.)
           const searchParams = request.nextUrl.searchParams;
+          const redirectTo = searchParams.get('redirect_to');
+          
           searchParams.forEach((value, key) => {
             // Only keep non-auth parameters
             if (key !== 'token' && key !== 'type' && key !== 'code') {
               if (key !== 'error' || error) {
                 // Keep error param only if it's an actual error
-                cleanUrl.searchParams.set(key, value);
+                // For redirect_to, extract returnUrl if it points to /auth/callback
+                if (key === 'redirect_to' && redirectTo) {
+                  console.log('🔍 [Middleware] Processing redirect_to parameter:', {
+                    redirectTo,
+                    timestamp: new Date().toISOString(),
+                  });
+                  
+                  try {
+                    const redirectToUrl = new URL(redirectTo);
+                    const returnUrlFromRedirectTo = redirectToUrl.searchParams.get('returnUrl');
+                    const pathname = redirectToUrl.pathname;
+                    const isCallbackPath = pathname.includes('/auth/callback');
+                    
+                    console.log('🔍 [Middleware] Parsed redirect_to URL:', {
+                      pathname,
+                      isCallbackPath,
+                      hasReturnUrl: !!returnUrlFromRedirectTo,
+                      returnUrl: returnUrlFromRedirectTo,
+                      timestamp: new Date().toISOString(),
+                    });
+                    
+                    if (returnUrlFromRedirectTo && isCallbackPath) {
+                      // Extract returnUrl from redirect_to and set it directly
+                      cleanUrl.searchParams.set('returnUrl', returnUrlFromRedirectTo);
+                      
+                      // Also preserve email and terms_accepted if they exist in redirect_to
+                      const emailFromRedirectTo = redirectToUrl.searchParams.get('email');
+                      const termsAcceptedFromRedirectTo = redirectToUrl.searchParams.get('terms_accepted');
+                      if (emailFromRedirectTo) {
+                        cleanUrl.searchParams.set('email', emailFromRedirectTo);
+                      }
+                      if (termsAcceptedFromRedirectTo) {
+                        cleanUrl.searchParams.set('terms_accepted', termsAcceptedFromRedirectTo);
+                      }
+                      
+                      console.log('✅ [Middleware] Extracted returnUrl from redirect_to:', {
+                        redirectTo,
+                        extractedReturnUrl: returnUrlFromRedirectTo,
+                        email: emailFromRedirectTo,
+                        termsAccepted: termsAcceptedFromRedirectTo,
+                        timestamp: new Date().toISOString(),
+                      });
+                    } else {
+                      // Keep redirect_to as is if it doesn't point to callback
+                      console.log('⚠️ [Middleware] Keeping redirect_to as is (not callback or no returnUrl):', {
+                        pathname,
+                        isCallbackPath,
+                        hasReturnUrl: !!returnUrlFromRedirectTo,
+                        timestamp: new Date().toISOString(),
+                      });
+                      cleanUrl.searchParams.set(key, value);
+                    }
+                  } catch (e) {
+                    // redirect_to might not be a valid URL, keep it as is
+                    console.error('❌ [Middleware] Failed to parse redirect_to:', {
+                      redirectTo,
+                      error: e instanceof Error ? e.message : String(e),
+                      timestamp: new Date().toISOString(),
+                    });
+                    cleanUrl.searchParams.set(key, value);
+                  }
+                } else {
+                  cleanUrl.searchParams.set(key, value);
+                }
               }
             }
           });
