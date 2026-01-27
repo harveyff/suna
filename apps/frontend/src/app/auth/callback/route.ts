@@ -197,16 +197,20 @@ export async function GET(request: NextRequest) {
     const redirectStartTime = Date.now();
     
     // Use HTML redirect instead of 307 to avoid large Set-Cookie header issues
+    // Small delay to ensure cookies are processed before redirect
     const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>Redirecting...</title>
-  <meta http-equiv="refresh" content="0;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
+  <meta http-equiv="refresh" content="1;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
 </head>
 <body>
   <script>
-    window.location.href = ${JSON.stringify(redirectUrl.toString())};
+    // Small delay to ensure cookies are processed before redirect
+    setTimeout(function() {
+      window.location.href = ${JSON.stringify(redirectUrl.toString())};
+    }, 100);
   </script>
   <p>Redirecting to <a href="${redirectUrl.toString().replace(/"/g, '&quot;')}">${redirectUrl.toString().replace(/"/g, '&quot;')}</a>...</p>
 </body>
@@ -246,13 +250,19 @@ export async function GET(request: NextRequest) {
     
     if (sessionCookieForResponse && sessionCookieForResponse.value && sessionCookieForResponse.value.length > 0) {
       try {
+        // CRITICAL: Always use secure=true for HTTPS, and ensure cookie options match Supabase expectations
         htmlResponse.cookies.set(sessionCookieForResponse.name, sessionCookieForResponse.value, {
           path: '/',
           sameSite: 'lax' as const,
           httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
+          secure: true, // Always secure for HTTPS
         });
-        console.log('✅ [AUTH_CALLBACK] Session cookie copied to HTML response');
+        console.log('✅ [AUTH_CALLBACK] Session cookie copied to HTML response:', {
+          cookieName: sessionCookieForResponse.name,
+          cookieLength: sessionCookieForResponse.value.length,
+          options: { path: '/', sameSite: 'lax', httpOnly: true, secure: true },
+          timestamp: new Date().toISOString(),
+        });
       } catch (error) {
         console.error(`❌ [AUTH_CALLBACK] Failed to copy session cookie:`, {
           error: error instanceof Error ? error.message : String(error),
@@ -260,6 +270,14 @@ export async function GET(request: NextRequest) {
           timestamp: new Date().toISOString(),
         });
       }
+    } else {
+      console.warn('⚠️ [AUTH_CALLBACK] No session cookie found to copy:', {
+        hasSessionCookie: !!sessionCookieForResponse,
+        sessionCookieName: sessionCookieForResponse?.name,
+        sessionCookieLength: sessionCookieForResponse?.value?.length || 0,
+        totalCookiesAvailable: allCookies.length,
+        timestamp: new Date().toISOString(),
+      });
     }
     
     // Log cookies that are now included in response
@@ -271,6 +289,15 @@ export async function GET(request: NextRequest) {
         name: c.name,
         valueLength: c.value.length,
       })),
+      timestamp: new Date().toISOString(),
+    });
+    
+    // Log response headers to verify Set-Cookie header is present
+    const responseHeaders = Object.fromEntries(htmlResponse.headers.entries());
+    console.log('🔍 [AUTH_CALLBACK] Response headers (existing session):', {
+      headers: responseHeaders,
+      hasSetCookie: htmlResponse.headers.get('set-cookie') !== null,
+      setCookieValue: htmlResponse.headers.get('set-cookie')?.substring(0, 100) + '...',
       timestamp: new Date().toISOString(),
     });
     
@@ -464,11 +491,14 @@ export async function GET(request: NextRequest) {
 <head>
   <meta charset="utf-8">
   <title>Redirecting...</title>
-  <meta http-equiv="refresh" content="0;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
+  <meta http-equiv="refresh" content="1;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
 </head>
 <body>
   <script>
-    window.location.href = ${JSON.stringify(redirectUrl.toString())};
+    // Small delay to ensure cookies are processed before redirect
+    setTimeout(function() {
+      window.location.href = ${JSON.stringify(redirectUrl.toString())};
+    }, 100);
   </script>
   <p>Redirecting to <a href="${redirectUrl.toString().replace(/"/g, '&quot;')}">${redirectUrl.toString().replace(/"/g, '&quot;')}</a>...</p>
 </body>
@@ -512,13 +542,19 @@ export async function GET(request: NextRequest) {
             
             if (expiredSessionCookie && expiredSessionCookie.value && expiredSessionCookie.value.length > 0) {
               try {
+                // CRITICAL: Always use secure=true for HTTPS, and ensure cookie options match Supabase expectations
                 htmlResponse.cookies.set(expiredSessionCookie.name, expiredSessionCookie.value, {
                   path: '/',
                   sameSite: 'lax' as const,
                   httpOnly: true,
-                  secure: process.env.NODE_ENV === 'production',
+                  secure: true, // Always secure for HTTPS
                 });
-                console.log('✅ [AUTH_CALLBACK] Session cookie copied to HTML response');
+                console.log('✅ [AUTH_CALLBACK] Session cookie copied to HTML response:', {
+                  cookieName: expiredSessionCookie.name,
+                  cookieLength: expiredSessionCookie.value.length,
+                  options: { path: '/', sameSite: 'lax', httpOnly: true, secure: true },
+                  timestamp: new Date().toISOString(),
+                });
               } catch (error) {
                 console.error(`❌ [AUTH_CALLBACK] Failed to copy session cookie:`, {
                   error: error instanceof Error ? error.message : String(error),
@@ -526,6 +562,14 @@ export async function GET(request: NextRequest) {
                   timestamp: new Date().toISOString(),
                 });
               }
+            } else {
+              console.warn('⚠️ [AUTH_CALLBACK] No session cookie found to copy:', {
+                hasSessionCookie: !!expiredSessionCookie,
+                sessionCookieName: expiredSessionCookie?.name,
+                sessionCookieLength: expiredSessionCookie?.value?.length || 0,
+                totalCookiesAvailable: expiredAllCookies.length,
+                timestamp: new Date().toISOString(),
+              });
             }
             
             // Log cookies that are now included in response
@@ -537,6 +581,17 @@ export async function GET(request: NextRequest) {
                 name: c.name,
                 valueLength: c.value.length,
               })),
+              timestamp: new Date().toISOString(),
+            });
+            
+            // Log response headers to verify Set-Cookie header is present
+            const expiredResponseHeaders = Object.fromEntries(htmlResponse.headers.entries());
+            const expiredSetCookieHeader = htmlResponse.headers.get('set-cookie') || htmlResponse.headers.get('Set-Cookie');
+            console.log('🔍 [AUTH_CALLBACK] Response headers (expired token):', {
+              headers: expiredResponseHeaders,
+              hasSetCookie: expiredSetCookieHeader !== null,
+              setCookieValue: expiredSetCookieHeader?.substring(0, 100) + '...',
+              allHeaderKeys: Array.from(htmlResponse.headers.keys()),
               timestamp: new Date().toISOString(),
             });
             
@@ -700,7 +755,8 @@ export async function GET(request: NextRequest) {
           timestamp: new Date().toISOString(),
         });
         
-        // Create HTML page that redirects via JavaScript
+        // Create HTML page that redirects via JavaScript with a small delay
+        // This gives the browser time to process the Set-Cookie header before redirecting
         // Cookies are already set via cookies().set() in createClient() above,
         // so they'll be automatically included in this HTML response
         // This avoids the large Set-Cookie header in redirect response
@@ -709,11 +765,14 @@ export async function GET(request: NextRequest) {
 <head>
   <meta charset="utf-8">
   <title>Redirecting...</title>
-  <meta http-equiv="refresh" content="0;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
+  <meta http-equiv="refresh" content="1;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
 </head>
 <body>
   <script>
-    window.location.href = ${JSON.stringify(redirectUrl.toString())};
+    // Small delay to ensure cookies are processed before redirect
+    setTimeout(function() {
+      window.location.href = ${JSON.stringify(redirectUrl.toString())};
+    }, 100);
   </script>
   <p>Redirecting to <a href="${redirectUrl.toString().replace(/"/g, '&quot;')}">${redirectUrl.toString().replace(/"/g, '&quot;')}</a>...</p>
 </body>
@@ -753,13 +812,19 @@ export async function GET(request: NextRequest) {
         
         if (sessionCookie && sessionCookie.value && sessionCookie.value.length > 0) {
           try {
+            // CRITICAL: Always use secure=true for HTTPS, and ensure cookie options match Supabase expectations
             htmlResponse.cookies.set(sessionCookie.name, sessionCookie.value, {
               path: '/',
               sameSite: 'lax' as const,
               httpOnly: true,
-              secure: process.env.NODE_ENV === 'production',
+              secure: true, // Always secure for HTTPS
             });
-            console.log('✅ [AUTH_CALLBACK] Session cookie copied to HTML response');
+            console.log('✅ [AUTH_CALLBACK] Session cookie copied to HTML response:', {
+              cookieName: sessionCookie.name,
+              cookieLength: sessionCookie.value.length,
+              options: { path: '/', sameSite: 'lax', httpOnly: true, secure: true },
+              timestamp: new Date().toISOString(),
+            });
           } catch (error) {
             console.error(`❌ [AUTH_CALLBACK] Failed to copy session cookie:`, {
               error: error instanceof Error ? error.message : String(error),
@@ -767,6 +832,14 @@ export async function GET(request: NextRequest) {
               timestamp: new Date().toISOString(),
             });
           }
+        } else {
+          console.warn('⚠️ [AUTH_CALLBACK] No session cookie found to copy:', {
+            hasSessionCookie: !!sessionCookie,
+            sessionCookieName: sessionCookie?.name,
+            sessionCookieLength: sessionCookie?.value?.length || 0,
+            totalCookiesAvailable: allCookies.length,
+            timestamp: new Date().toISOString(),
+          });
         }
         
         // Log cookies that are now included in response
@@ -783,11 +856,15 @@ export async function GET(request: NextRequest) {
           timestamp: new Date().toISOString(),
         });
         
-        // Log response headers
+        // Log response headers to verify Set-Cookie header is present
         const responseHeaders = Object.fromEntries(htmlResponse.headers.entries());
-        console.log('🔍 [AUTH_CALLBACK] Response headers:', {
+        const setCookieHeader = htmlResponse.headers.get('set-cookie') || htmlResponse.headers.get('Set-Cookie');
+        console.log('🔍 [AUTH_CALLBACK] Response headers (token verified):', {
           headers: responseHeaders,
           headerCount: Object.keys(responseHeaders).length,
+          hasSetCookie: setCookieHeader !== null,
+          setCookieValue: setCookieHeader?.substring(0, 100) + '...',
+          allHeaderKeys: Array.from(htmlResponse.headers.keys()),
           timestamp: new Date().toISOString(),
         });
         
