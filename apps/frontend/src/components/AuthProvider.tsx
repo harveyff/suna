@@ -31,15 +31,53 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const getInitialSession = async () => {
+      console.log('🔄 [AuthProvider] Starting session initialization...', {
+        timestamp: new Date().toISOString(),
+      });
+      
       try {
         const {
           data: { session: currentSession },
+          error: sessionError,
         } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('❌ [AuthProvider] Error getting session:', {
+            error: sessionError.message,
+            errorCode: sessionError.code,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        
+        console.log('🔍 [AuthProvider] Session check result:', {
+          hasSession: !!currentSession,
+          hasUser: !!currentSession?.user,
+          userId: currentSession?.user?.id,
+          email: currentSession?.user?.email,
+          expiresAt: currentSession?.expires_at,
+          timestamp: new Date().toISOString(),
+        });
+        
         setSession(currentSession);
         setUser(currentSession?.user ?? null);
+        
+        console.log('✅ [AuthProvider] Session initialized:', {
+          hasSession: !!currentSession,
+          hasUser: !!currentSession?.user,
+          userId: currentSession?.user?.id,
+          timestamp: new Date().toISOString(),
+        });
       } catch (error) {
+        console.error('❌ [AuthProvider] Unexpected error during session initialization:', {
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        });
       } finally {
         setIsLoading(false);
+        console.log('✅ [AuthProvider] Loading completed:', {
+          isLoading: false,
+          timestamp: new Date().toISOString(),
+        });
       }
     };
 

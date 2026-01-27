@@ -228,16 +228,48 @@ function LoginContent() {
   // Handle OTP verification
   const handleVerifyOtp = async (prevState: any, formData: FormData) => {
     const email = expiredEmailState || formData.get('email') as string;
+    const otpLength = otpCode.length;
+    
+    console.log('🔐 [Auth Page] Starting OTP verification:', {
+      email,
+      otpLength,
+      returnUrl: returnUrl || '/dashboard',
+      hasExpiredEmail: !!expiredEmailState,
+      isPkceExpired,
+      timestamp: new Date().toISOString(),
+    });
+    
     if (!email) {
+      console.error('❌ [Auth Page] No email provided for OTP verification');
       toast.error(t('pleaseEnterValidEmail'));
       return {};
+    }
+
+    if (otpLength !== 6) {
+      console.warn('⚠️ [Auth Page] Invalid OTP length:', {
+        otpLength,
+        expectedLength: 6,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     formData.set('email', email);
     formData.set('token', otpCode);
     formData.set('returnUrl', returnUrl || '/dashboard');
 
+    console.log('🔄 [Auth Page] Calling verifyOtp server action...', {
+      email,
+      timestamp: new Date().toISOString(),
+    });
+    
     const result = await verifyOtp(prevState, formData);
+    
+    console.log('📥 [Auth Page] verifyOtp result received:', {
+      hasResult: !!result,
+      hasSuccess: result && typeof result === 'object' && 'success' in result,
+      hasMessage: result && typeof result === 'object' && 'message' in result,
+      timestamp: new Date().toISOString(),
+    });
 
     // If verifyOtp returns a result (error case), handle it
     // If verifyOtp redirects successfully, it will throw a NEXT_REDIRECT error

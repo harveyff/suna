@@ -150,9 +150,79 @@ export default function DashboardLayoutContent({
   const isApiHealthy = healthData?.status === 'ok' && !healthError;
 
   // Check authentication status
+  // Wait a bit for AuthProvider to fully initialize and read session cookies
+  // This prevents redirect loops when session cookies are being set
   useEffect(() => {
+    console.log('🔍 [Dashboard] Auth check:', {
+      isLoading,
+      hasUser: !!user,
+      userId: user?.id,
+      pathname: typeof window !== 'undefined' ? window.location.pathname : 'unknown',
+      timestamp: new Date().toISOString(),
+    });
+
     if (!isLoading && !user) {
-      router.push('/auth');
+      // Check if auth cookies exist - if they do, wait a bit for AuthProvider to read them
+      const hasAuthCookie = typeof document !== 'undefined' && (
+        document.cookie.includes('sb-supabase-kong-auth-token') ||
+        document.cookie.includes('sb-2f5c36de-auth-token') ||
+        document.cookie.includes('sb-demo-auth-token')
+      );
+      
+      console.log('⚠️ [Dashboard] User not authenticated, checking cookies:', {
+        hasAuthCookie,
+        cookieString: typeof document !== 'undefined' ? document.cookie.substring(0, 200) : 'N/A',
+        timestamp: new Date().toISOString(),
+      });
+      
+      if (hasAuthCookie) {
+        // Auth cookies exist but user is null - AuthProvider might still be initializing
+        // Wait a bit before redirecting to give AuthProvider time to read the session
+        console.log('⏳ [Dashboard] Auth cookies found but user is null, waiting for AuthProvider...', {
+          waitTime: '500ms',
+          timestamp: new Date().toISOString(),
+        });
+        
+        const timeoutId = setTimeout(() => {
+          // Re-check user after delay
+          console.log('🔍 [Dashboard] Re-checking user after delay:', {
+            hasUser: !!user,
+            userId: user?.id,
+            timestamp: new Date().toISOString(),
+          });
+          
+          if (!user) {
+            console.log('❌ [Dashboard] User still null after delay, redirecting to /auth', {
+              timestamp: new Date().toISOString(),
+            });
+            router.push('/auth');
+          } else {
+            console.log('✅ [Dashboard] User found after delay, staying on dashboard', {
+              userId: user.id,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }, 500); // Wait 500ms for AuthProvider to initialize
+        
+        return () => {
+          console.log('🧹 [Dashboard] Cleaning up auth check timeout', {
+            timestamp: new Date().toISOString(),
+          });
+          clearTimeout(timeoutId);
+        };
+      } else {
+        // No auth cookies, user is definitely not authenticated
+        console.log('❌ [Dashboard] No auth cookies found, redirecting to /auth', {
+          timestamp: new Date().toISOString(),
+        });
+        router.push('/auth');
+      }
+    } else if (user) {
+      console.log('✅ [Dashboard] User authenticated, staying on dashboard', {
+        userId: user.id,
+        email: user.email,
+        timestamp: new Date().toISOString(),
+      });
     }
   }, [user, isLoading, router]);
 

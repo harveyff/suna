@@ -318,6 +318,13 @@ export async function verifyOtp(prevState: any, formData: FormData) {
 
   const supabase = await createClient();
 
+  console.log('🔐 [verifyOtp] Starting OTP verification:', {
+    email: email.trim().toLowerCase(),
+    tokenLength: token.trim().length,
+    returnUrl,
+    timestamp: new Date().toISOString(),
+  });
+
   const { data, error } = await supabase.auth.verifyOtp({
     email: email.trim().toLowerCase(),
     token: token.trim(),
@@ -325,14 +332,38 @@ export async function verifyOtp(prevState: any, formData: FormData) {
   });
 
   if (error) {
+    console.error('❌ [verifyOtp] OTP verification failed:', {
+      error: error.message,
+      errorCode: error.code,
+      email: email.trim().toLowerCase(),
+      timestamp: new Date().toISOString(),
+    });
     return { message: error.message || 'Invalid or expired code' };
   }
+
+  console.log('✅ [verifyOtp] OTP verified successfully:', {
+    userId: data.user?.id,
+    email: data.user?.email,
+    timestamp: new Date().toISOString(),
+  });
 
   // Verify session is set after OTP verification
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
+    console.error('❌ [verifyOtp] Session not created after verification:', {
+      userId: data.user?.id,
+      email: data.user?.email,
+      timestamp: new Date().toISOString(),
+    });
     return { message: 'Session not created after verification. Please try again.' };
   }
+
+  console.log('✅ [verifyOtp] Session created successfully:', {
+    userId: session.user.id,
+    email: session.user.email,
+    expiresAt: session.expires_at,
+    timestamp: new Date().toISOString(),
+  });
 
   // Determine if new user (for analytics)
   const isNewUser = data.user && (Date.now() - new Date(data.user.created_at).getTime()) < 60000;
@@ -344,6 +375,13 @@ export async function verifyOtp(prevState: any, formData: FormData) {
   const redirectUrl = new URL(finalReturnUrl, 'http://localhost');
   redirectUrl.searchParams.set('auth_event', authEvent);
   redirectUrl.searchParams.set('auth_method', 'email_otp');
+  
+  console.log('🔄 [verifyOtp] Redirecting after successful verification:', {
+    redirectTo: `${redirectUrl.pathname}${redirectUrl.search}`,
+    authEvent,
+    userId: session.user.id,
+    timestamp: new Date().toISOString(),
+  });
   
   // Server-side redirect ensures clean URL and proper session handling
   redirect(`${redirectUrl.pathname}${redirectUrl.search}`);

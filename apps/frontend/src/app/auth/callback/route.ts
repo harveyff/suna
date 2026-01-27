@@ -92,23 +92,61 @@ export async function GET(request: NextRequest) {
 
     // Handle PKCE magic link tokens (prefixed with pkce_)
     if (token.startsWith('pkce_')) {
+      console.log('🔐 [AUTH_CALLBACK] Processing PKCE token:', {
+        tokenPrefix: token.substring(0, 20) + '...',
+        tokenLength: token.length,
+        hasEmail: !!extractedEmail,
+        email: extractedEmail,
+        type,
+        redirectTo: redirectTo || 'N/A',
+        timestamp: new Date().toISOString(),
+      });
+      
       try {
         // Remove pkce_ prefix and try to exchange for session
         const codeWithoutPrefix = token.replace(/^pkce_/, '')
+        console.log('🔄 [AUTH_CALLBACK] Attempting exchangeCodeForSession:', {
+          codeLength: codeWithoutPrefix.length,
+          codePrefix: codeWithoutPrefix.substring(0, 20) + '...',
+          timestamp: new Date().toISOString(),
+        });
+        
         const { data, error } = await supabase.auth.exchangeCodeForSession(codeWithoutPrefix)
         
         if (error) {
-          console.error('❌ PKCE token verification failed:', error)
+          console.error('❌ [AUTH_CALLBACK] PKCE token verification failed:', {
+            error: error.message,
+            errorCode: error.code,
+            errorStatus: error.status,
+            tokenPrefix: token.substring(0, 20) + '...',
+            hasEmail: !!extractedEmail,
+            email: extractedEmail,
+            timestamp: new Date().toISOString(),
+          });
           
           // Handle flow_state_not_found separately - it's not necessarily expired, just needs OTP entry
           // This allows users to enter OTP code even if PKCE flow state is lost
           if (error.code === 'flow_state_not_found' && extractedEmail) {
-            console.log('🔄 PKCE flow state not found, redirecting to /auth for OTP entry:', { email: extractedEmail })
+            console.log('🔄 [AUTH_CALLBACK] PKCE flow state not found, redirecting to /auth for OTP entry:', {
+              email: extractedEmail,
+              errorCode: error.code,
+              errorMessage: error.message,
+              returnUrl: next,
+              timestamp: new Date().toISOString(),
+            });
+            
             const authUrl = new URL(`${baseUrl}/auth`)
             authUrl.searchParams.set('email', extractedEmail)
             authUrl.searchParams.set('expired', 'true')
             authUrl.searchParams.set('pkce_expired', 'true') // Flag to skip "link expired" message
             if (next) authUrl.searchParams.set('returnUrl', next)
+            
+            console.log('🔄 [AUTH_CALLBACK] Redirecting to auth page:', {
+              redirectUrl: authUrl.toString(),
+              email: extractedEmail,
+              timestamp: new Date().toISOString(),
+            });
+            
             return NextResponse.redirect(authUrl)
           }
           
@@ -138,7 +176,13 @@ export async function GET(request: NextRequest) {
         
         // Success - user is authenticated
         if (data.user) {
-          console.log('✅ PKCE token verified successfully:', { userId: data.user.id })
+          console.log('✅ [AUTH_CALLBACK] PKCE token verified successfully:', {
+            userId: data.user.id,
+            email: data.user.email,
+            hasSession: !!data.session,
+            sessionExpiresAt: data.session?.expires_at,
+            timestamp: new Date().toISOString(),
+          });
           
           // Handle terms acceptance if needed
           if (termsAccepted) {

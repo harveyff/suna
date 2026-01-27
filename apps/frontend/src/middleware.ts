@@ -108,6 +108,7 @@ export async function middleware(request: NextRequest) {
   // Handle Supabase verification redirects at root level and /auth
   // Supabase sometimes redirects to root (/) or /auth instead of /auth/callback
   // Detect authentication parameters and redirect to proper callback handler
+  // BUT: Skip this if user is already authenticated (to avoid redirect loops)
   if (pathname === '/' || pathname === '' || pathname === '/auth') {
     const searchParams = request.nextUrl.searchParams;
     const code = searchParams.get('code');
@@ -115,9 +116,67 @@ export async function middleware(request: NextRequest) {
     const type = searchParams.get('type');
     const error = searchParams.get('error');
     
-    // If we have Supabase auth parameters, redirect to /auth/callback
-    // Note: Mobile apps use direct deep links and bypass this route
+    // If we have Supabase auth parameters, check if user is already authenticated first
     if (code || token || type || error) {
+      // Quick check: if user already has auth session cookie, skip redirect
+      // This prevents redirect loops when authenticated users visit URLs with token params
+      const hasAuthCookie = request.cookies.has('sb-supabase-kong-auth-token') || 
+                            request.cookies.has('sb-2f5c36de-auth-token') ||
+                            request.cookies.has('sb-demo-auth-token');
+      
+      if (hasAuthCookie) {
+        // User is already authenticated, ignore token params and continue
+        // Remove token params from URL to prevent future redirects
+        const cleanUrl = new URL(request.url);
+        const hadTokenParams = cleanUrl.searchParams.has('token') || 
+                              cleanUrl.searchParams.has('code') || 
+                              cleanUrl.searchParams.has('type');
+        
+        console.log('🔍 [Middleware] Authenticated user with auth params:', {
+          from: pathname,
+          hasAuthCookie: true,
+          hadToken: !!token,
+          hadCode: !!code,
+          hadType: !!type,
+          hadError: !!error,
+          hadTokenParams,
+          currentUrl: request.url,
+          timestamp: new Date().toISOString(),
+        });
+        
+        if (hadTokenParams) {
+          cleanUrl.searchParams.delete('token');
+          cleanUrl.searchParams.delete('type');
+          cleanUrl.searchParams.delete('code');
+          if (!error) {
+            // Only remove error param if it's not an actual error
+            cleanUrl.searchParams.delete('error');
+          }
+          
+          console.log('🔄 [Middleware] User already authenticated, cleaning token params from URL:', {
+            from: pathname,
+            hadToken: !!token,
+            hadCode: !!code,
+            hadType: !!type,
+            originalUrl: request.url,
+            cleanedUrl: cleanUrl.toString(),
+            timestamp: new Date().toISOString(),
+          });
+          
+          return NextResponse.redirect(cleanUrl);
+        }
+        
+        // No token params to clean, just continue
+        console.log('✅ [Middleware] User already authenticated, ignoring auth params (no cleanup needed):', {
+          from: pathname,
+          hasToken: !!token,
+          hasCode: !!code,
+          hasType: !!type,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      
+      // User not authenticated, redirect to /auth/callback for processing
       // Calculate correct base URL from headers (handles proxy environments)
       const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('X-Forwarded-Host');
       const forwardedProto = request.headers.get('x-forwarded-proto') || request.headers.get('X-Forwarded-Proto') || 'https';
