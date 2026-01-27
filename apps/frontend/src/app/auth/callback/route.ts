@@ -130,6 +130,25 @@ export async function GET(request: NextRequest) {
   // 3. Token expired but user already has a valid session
   console.log('🔍 [AUTH_CALLBACK] Checking existing session...');
   const sessionCheckStartTime = Date.now();
+  
+  // IMPORTANT: Check for session cookies first before calling getSession()
+  // This helps identify if cookies are present but not being read correctly
+  const { cookies } = await import('next/headers');
+  const cookieStore = await cookies();
+  const allCookies = cookieStore.getAll();
+  const authCookies = allCookies.filter(c => 
+    c.name.includes('supabase') || 
+    c.name.includes('auth') || 
+    c.name === 'sb-supabase-kong-auth-token'
+  );
+  
+  console.log('🔍 [AUTH_CALLBACK] Auth cookies check:', {
+    totalCookies: allCookies.length,
+    authCookiesCount: authCookies.length,
+    authCookieNames: authCookies.map(c => c.name),
+    timestamp: new Date().toISOString(),
+  });
+  
   const { data: { session: existingSession }, error: sessionCheckError } = await supabase.auth.getSession()
   const sessionCheckDuration = Date.now() - sessionCheckStartTime;
   
@@ -138,14 +157,15 @@ export async function GET(request: NextRequest) {
     hasUser: !!existingSession?.user,
     userId: existingSession?.user?.id,
     sessionExpiresAt: existingSession?.expires_at,
+    hasAuthCookies: authCookies.length > 0,
     error: sessionCheckError?.message,
     duration: `${sessionCheckDuration}ms`,
     timestamp: new Date().toISOString(),
   });
   
+  // If user already authenticated, redirect immediately without processing token
+  // This prevents "token already used" errors when browser retries callback
   if (existingSession && existingSession.user) {
-    // User already authenticated, redirect to dashboard without processing token again
-    // This prevents "token already used" errors when browser retries callback
     const redirectUrl = new URL(`${baseUrl}${next}`)
     console.log('✅ [AUTH_CALLBACK] User already authenticated, skipping token verification:', {
       userId: existingSession.user.id,
@@ -157,17 +177,7 @@ export async function GET(request: NextRequest) {
     const redirectStartTime = Date.now();
     const redirectResponse = NextResponse.redirect(redirectUrl, { status: 307 })
     
-    // Copy existing cookies to redirect response
-    const { cookies } = await import('next/headers');
-    const cookieStore = await cookies();
-    const allCookies = cookieStore.getAll();
-    
-    console.log('🔍 [AUTH_CALLBACK] Copying cookies to redirect response:', {
-      cookiesCount: allCookies.length,
-      cookieNames: allCookies.map(c => c.name),
-      timestamp: new Date().toISOString(),
-    });
-    
+    // Copy ALL cookies to redirect response to ensure session is preserved
     allCookies.forEach((cookie) => {
       redirectResponse.cookies.set(cookie.name, cookie.value);
     });
@@ -179,17 +189,25 @@ export async function GET(request: NextRequest) {
     const redirectDuration = Date.now() - redirectStartTime;
     const totalDuration = Date.now() - requestStartTime;
     
-    console.log('✅ [AUTH_CALLBACK] Redirect response created:', {
+    console.log('✅ [AUTH_CALLBACK] Redirect response created for existing session:', {
       status: 307,
       redirectUrl: redirectUrl.toString(),
       cookiesInResponse: redirectResponse.cookies.getAll().map(c => c.name),
-      headers: Object.fromEntries(redirectResponse.headers.entries()),
       redirectDuration: `${redirectDuration}ms`,
       totalDuration: `${totalDuration}ms`,
       timestamp: new Date().toISOString(),
     });
     
     return redirectResponse
+  }
+  
+  // If we have auth cookies but no session, there might be a cookie issue
+  // Still proceed with token verification, but log the discrepancy
+  if (authCookies.length > 0 && !existingSession) {
+    console.warn('⚠️ [AUTH_CALLBACK] Auth cookies present but no session found:', {
+      authCookieNames: authCookies.map(c => c.name),
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // Handle token-based verification (magic link PKCE token)
@@ -410,6 +428,11 @@ export async function GET(request: NextRequest) {
         // This ensures cookies are set correctly via createServerClient's setAll
         console.log('🔍 [AUTH_CALLBACK] Getting session after token verification...');
         const sessionGetStartTime = Date.now();
+        
+        // Wait a brief moment to ensure cookies are written to the response
+        // This helps prevent race conditions where cookies aren't yet available
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
         const sessionGetDuration = Date.now() - sessionGetStartTime;
         
@@ -435,9 +458,10 @@ export async function GET(request: NextRequest) {
         // Get cookies AFTER session is established (so we capture all cookies set by createServerClient)
         console.log('🔍 [AUTH_CALLBACK] Getting cookies from cookie store...');
         const cookieGetStartTime = Date.now();
-        const { cookies } = await import('next/headers');
-        const cookieStore = await cookies();
-        const allCookies = cookieStore.getAll();
+        
+        // Re-fetch cookies to ensure we have the latest ones after session establishment
+        const cookieStoreAfterSession = await cookies();
+        const allCookies = cookieStoreAfterSession.getAll();
         const cookieGetDuration = Date.now() - cookieGetStartTime;
         
         console.log('🔍 [AUTH_CALLBACK] Cookies retrieved:', {
@@ -481,10 +505,47 @@ export async function GET(request: NextRequest) {
         // We MUST explicitly copy all cookies to the redirect response.
         // This ensures the browser receives the session cookies when following the redirect.
         const cookieCopyStartTime = Date.now();
-        allCookies.forEach((cookie) => {
-          redirectResponse.cookies.set(cookie.name, cookie.value);
+        
+        console.log('🍪 [AUTH_CALLBACK] Copying cookies to redirect response:', {
+          cookiesToCopy: allCookies.length,
+          cookieNames: allCookies.map(c => c.name),
+          authCookies: allCookies.filter(c => 
+            c.name.includes('supabase') || 
+            c.name.includes('auth') || 
+            c.name === 'sb-supabase-kong-auth-token'
+          ).map(c => ({
+            name: c.name,
+            valueLength: c.value.length,
+          })),
+          timestamp: new Date().toISOString(),
         });
+        
+        allCookies.forEach((cookie) => {
+          try {
+            // Copy cookie with proper options
+            redirectResponse.cookies.set(cookie.name, cookie.value, {
+              path: '/',
+              sameSite: 'lax',
+              httpOnly: cookie.name.includes('auth') || cookie.name.includes('supabase'),
+              secure: process.env.NODE_ENV === 'production',
+            });
+          } catch (error) {
+            console.error(`❌ [AUTH_CALLBACK] Failed to copy cookie ${cookie.name}:`, {
+              error: error instanceof Error ? error.message : String(error),
+              cookieName: cookie.name,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        });
+        
         const cookieCopyDuration = Date.now() - cookieCopyStartTime;
+        
+        console.log('🍪 [AUTH_CALLBACK] Cookies copied to redirect response:', {
+          cookiesCopied: redirectResponse.cookies.getAll().length,
+          cookieNames: redirectResponse.cookies.getAll().map(c => c.name),
+          duration: `${cookieCopyDuration}ms`,
+          timestamp: new Date().toISOString(),
+        });
         
         // Set additional headers to prevent caching issues
         redirectResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
