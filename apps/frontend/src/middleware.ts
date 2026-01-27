@@ -105,10 +105,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Handle Supabase verification redirects at root level
-  // Supabase sometimes redirects to root (/) instead of /auth/callback
+  // Handle Supabase verification redirects at root level and /auth
+  // Supabase sometimes redirects to root (/) or /auth instead of /auth/callback
   // Detect authentication parameters and redirect to proper callback handler
-  if (pathname === '/' || pathname === '') {
+  if (pathname === '/' || pathname === '' || pathname === '/auth') {
     const searchParams = request.nextUrl.searchParams;
     const code = searchParams.get('code');
     const token = searchParams.get('token');
@@ -118,14 +118,42 @@ export async function middleware(request: NextRequest) {
     // If we have Supabase auth parameters, redirect to /auth/callback
     // Note: Mobile apps use direct deep links and bypass this route
     if (code || token || type || error) {
-      const callbackUrl = new URL('/auth/callback', request.url);
+      // Calculate correct base URL from headers (handles proxy environments)
+      const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('X-Forwarded-Host');
+      const forwardedProto = request.headers.get('x-forwarded-proto') || request.headers.get('X-Forwarded-Proto') || 'https';
+      const host = request.headers.get('host') || request.headers.get('Host');
+      
+      let baseUrl: string;
+      if (forwardedHost) {
+        const protocol = forwardedProto || 'https';
+        baseUrl = `${protocol}://${forwardedHost}`;
+      } else if (host && !host.includes('0.0.0.0') && !host.includes('127.0.0.1')) {
+        const protocol = forwardedProto || 'https';
+        baseUrl = `${protocol}://${host}`;
+      } else {
+        baseUrl = request.nextUrl.origin;
+      }
+      
+      const callbackUrl = new URL('/auth/callback', baseUrl);
       
       // Preserve all query parameters
       searchParams.forEach((value, key) => {
         callbackUrl.searchParams.set(key, value);
       });
       
-      console.log('🔄 Redirecting Supabase verification from root to /auth/callback');
+      console.log('🔄 [Middleware] Redirecting Supabase verification to /auth/callback:', {
+        from: pathname,
+        hasCode: !!code,
+        hasToken: !!token,
+        hasType: !!type,
+        hasError: !!error,
+        forwardedHost,
+        forwardedProto,
+        host,
+        calculatedBaseUrl: baseUrl,
+        callbackUrl: callbackUrl.toString(),
+        timestamp: new Date().toISOString(),
+      });
       return NextResponse.redirect(callbackUrl);
     }
   }

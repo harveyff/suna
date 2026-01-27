@@ -21,10 +21,22 @@ export async function GET(request: NextRequest) {
   const termsAccepted = searchParams.get('terms_accepted') === 'true'
   const email = searchParams.get('email') || '' // Email passed from magic link redirect URL
 
-  // Use request origin for redirects (most reliable for local dev)
-  // This ensures localhost:3000 redirects stay on localhost, not staging
-  const requestOrigin = request.nextUrl.origin
-  const baseUrl = requestOrigin || process.env.NEXT_PUBLIC_URL || 'http://localhost:3000'
+  // Calculate correct base URL from headers (handles proxy environments)
+  // This ensures we use the external URL, not internal 0.0.0.0:3000
+  const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('X-Forwarded-Host')
+  const forwardedProto = request.headers.get('x-forwarded-proto') || request.headers.get('X-Forwarded-Proto') || 'https'
+  const host = request.headers.get('host') || request.headers.get('Host')
+  
+  let baseUrl: string
+  if (forwardedHost) {
+    const protocol = forwardedProto || 'https'
+    baseUrl = `${protocol}://${forwardedHost}`
+  } else if (host && !host.includes('0.0.0.0') && !host.includes('127.0.0.1')) {
+    const protocol = forwardedProto || 'https'
+    baseUrl = `${protocol}://${host}`
+  } else {
+    baseUrl = request.nextUrl.origin || process.env.NEXT_PUBLIC_URL || 'http://localhost:3000'
+  }
   const error = searchParams.get('error')
   const errorCode = searchParams.get('error_code')
   const errorDescription = searchParams.get('error_description')
@@ -61,14 +73,115 @@ export async function GET(request: NextRequest) {
 
   const supabase = await createClient()
 
-  // Handle token-based verification (email confirmation, etc.)
+  // Handle token-based verification (email confirmation, PKCE magic links, etc.)
   // Supabase sends these to the redirect URL for processing
   if (token && type) {
-    // For token-based flows, redirect to auth page that can handle the verification client-side
+    // Extract email from redirect_to parameter if available
+    const redirectTo = searchParams.get('redirect_to') || ''
+    let extractedEmail = email
+    if (!extractedEmail && redirectTo) {
+      try {
+        const redirectUrl = new URL(redirectTo)
+        extractedEmail = redirectUrl.searchParams.get('email') || ''
+      } catch (e) {
+        // redirect_to might not be a valid URL, try parsing as query string
+        const match = redirectTo.match(/email=([^&]+)/)
+        if (match) {
+          extractedEmail = decodeURIComponent(match[1])
+        }
+      }
+    }
+
+    // Handle PKCE magic link tokens (prefixed with pkce_)
+    if (token.startsWith('pkce_')) {
+      try {
+        // Remove pkce_ prefix and try to exchange for session
+        const codeWithoutPrefix = token.replace(/^pkce_/, '')
+        const { data, error } = await supabase.auth.exchangeCodeForSession(codeWithoutPrefix)
+        
+        if (error) {
+          console.error('❌ PKCE token verification failed:', error)
+          
+          // Check if expired/invalid
+          // Only mark as expired if explicitly stated in error code or message
+          // Don't use error.status === 400 as it's too broad (many errors are 400)
+          const isExpired = 
+            error.code === 'expired_token' ||
+            error.code === 'token_expired' ||
+            error.code === 'otp_expired' ||
+            error.code === 'flow_state_not_found' || // PKCE flow expired
+            (error.message?.toLowerCase().includes('expired') && !error.message?.toLowerCase().includes('not expired')) ||
+            (error.message?.toLowerCase().includes('invalid') && error.message?.toLowerCase().includes('token'))
+          
+          if (isExpired) {
+            // If flow state not found and we have email, redirect to /auth for OTP entry
+            if (error.code === 'flow_state_not_found' && extractedEmail) {
+              console.log('🔄 PKCE flow expired, redirecting to /auth for OTP entry:', { email: extractedEmail })
+              const authUrl = new URL(`${baseUrl}/auth`)
+              authUrl.searchParams.set('email', extractedEmail)
+              authUrl.searchParams.set('expired', 'true')
+              if (next) authUrl.searchParams.set('returnUrl', next)
+              return NextResponse.redirect(authUrl)
+            }
+            
+            // Otherwise redirect to auth page with expired state
+            const expiredUrl = new URL(`${baseUrl}/auth`)
+            expiredUrl.searchParams.set('expired', 'true')
+            if (extractedEmail) expiredUrl.searchParams.set('email', extractedEmail)
+            if (next) expiredUrl.searchParams.set('returnUrl', next)
+            return NextResponse.redirect(expiredUrl)
+          }
+          
+          // For other errors, redirect to auth page with error
+          const errorUrl = new URL(`${baseUrl}/auth`)
+          errorUrl.searchParams.set('error', error.message || 'verification_failed')
+          if (extractedEmail) errorUrl.searchParams.set('email', extractedEmail)
+          return NextResponse.redirect(errorUrl)
+        }
+        
+        // Success - user is authenticated
+        if (data.user) {
+          console.log('✅ PKCE token verified successfully:', { userId: data.user.id })
+          
+          // Handle terms acceptance if needed
+          if (termsAccepted) {
+            const currentMetadata = data.user.user_metadata || {}
+            if (!currentMetadata.terms_accepted_at) {
+              try {
+                await supabase.auth.updateUser({
+                  data: {
+                    ...currentMetadata,
+                    terms_accepted_at: new Date().toISOString(),
+                  },
+                })
+                console.log('✅ Terms acceptance date saved to user metadata')
+              } catch (updateError) {
+                console.warn('⚠️ Failed to save terms acceptance:', updateError)
+              }
+            }
+          }
+          
+          // Redirect to dashboard or returnUrl
+          const redirectUrl = new URL(`${baseUrl}${next}`)
+          redirectUrl.searchParams.set('auth_event', 'login')
+          redirectUrl.searchParams.set('auth_method', 'email')
+          return NextResponse.redirect(redirectUrl)
+        }
+      } catch (error) {
+        console.error('❌ Unexpected error processing PKCE token:', error)
+        const errorUrl = new URL(`${baseUrl}/auth`)
+        errorUrl.searchParams.set('error', 'unexpected_error')
+        if (extractedEmail) errorUrl.searchParams.set('email', extractedEmail)
+        return NextResponse.redirect(errorUrl)
+      }
+    }
+    
+    // For other token-based flows, redirect to auth page that can handle the verification client-side
     const verifyUrl = new URL(`${baseUrl}/auth`)
     verifyUrl.searchParams.set('token', token)
     verifyUrl.searchParams.set('type', type)
     if (termsAccepted) verifyUrl.searchParams.set('terms_accepted', 'true')
+    if (extractedEmail) verifyUrl.searchParams.set('email', extractedEmail)
     
     return NextResponse.redirect(verifyUrl)
   }
