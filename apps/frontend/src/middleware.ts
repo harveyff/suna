@@ -174,57 +174,27 @@ export async function middleware(request: NextRequest) {
   });
 
   // Get Supabase configuration with fallbacks
-  // Priority: 1) SUPABASE_URL (server-side, cluster-internal), 2) NEXT_PUBLIC_SUPABASE_URL, 3) fallback
-  // CRITICAL: Use same priority as server.ts to ensure cookie validation works correctly
-  let supabaseUrl = (process.env.SUPABASE_URL || '').trim();
-  let supabaseKey = (process.env.SUPABASE_ANON_KEY || '').trim();
+  // In Next.js standalone mode, these are available at runtime via environment variables
+  let supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  let supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
   
-  // If server-side env vars are not set, fall back to NEXT_PUBLIC_* vars
-  if (!supabaseUrl || supabaseUrl.trim() === '') {
-    const publicUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
-    
-    // Handle relative URLs (e.g., /supabase)
-    if (publicUrl && publicUrl.startsWith('/')) {
-      // In middleware, we can't access window.location, so we need to construct from request
-      const origin = request.nextUrl.origin;
-      supabaseUrl = origin + publicUrl;
-    } else if (publicUrl && 
-                !publicUrl.includes('demo.supabase.co') && 
-                !publicUrl.includes('placeholder')) {
-      // Use public URL if it's not a demo/placeholder value
-      supabaseUrl = publicUrl;
-    } else {
-      // Use cluster-internal default
-      supabaseUrl = 'http://supabase-kong:8000';
-    }
+  // Handle relative URLs (e.g., /supabase)
+  if (supabaseUrl && supabaseUrl.startsWith('/')) {
+    // In middleware, we can't access window.location, so we need to construct from request
+    const origin = request.nextUrl.origin;
+    supabaseUrl = origin + supabaseUrl;
   }
   
-  // Check if URL is still demo/placeholder and replace with cluster-internal default
-  if (supabaseUrl.includes('demo.supabase.co') || 
-      supabaseUrl.includes('placeholder') ||
-      supabaseUrl.trim() === '') {
-    supabaseUrl = 'http://supabase-kong:8000';
+  // Fallback: if URL is empty or invalid, use current origin + /supabase
+  if (!supabaseUrl || supabaseUrl.trim() === '' || supabaseUrl.includes('placeholder')) {
+    const origin = request.nextUrl.origin;
+    supabaseUrl = origin + '/supabase';
   }
   
-  // Handle key: use server-side env var first, then fall back to NEXT_PUBLIC_*
+  // Fallback: if key is empty, use demo key
   if (!supabaseKey || supabaseKey.trim() === '') {
-    const publicKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
-    if (publicKey && publicKey.trim() !== '') {
-      supabaseKey = publicKey;
-    } else {
-      // Last resort: use demo key (should not happen in production)
-      supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
-    }
+    supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
   }
-
-  // Log Supabase configuration for debugging
-  console.log('🔍 [Middleware] Supabase configuration:', {
-    supabaseUrl,
-    hasSupabaseKey: !!supabaseKey,
-    supabaseKeyLength: supabaseKey.length,
-    pathname,
-    timestamp: new Date().toISOString(),
-  });
 
   const supabase = createServerClient(
     supabaseUrl,
@@ -251,98 +221,13 @@ export async function middleware(request: NextRequest) {
   let user: { id: string; user_metadata?: { locale?: string } } | null = null;
   let authError: Error | null = null;
   
-  // Log cookies before auth check for debugging
-  const allCookies = request.cookies.getAll();
-  const authCookies = allCookies.filter(c => 
-    c.name.includes('supabase') || 
-    c.name.includes('auth') || 
-    c.name === 'sb-supabase-kong-auth-token'
-  );
-  
-  const sessionCookie = authCookies.find(c => c.name === 'sb-supabase-kong-auth-token');
-  
-  // Log request headers for debugging
-  const requestHeaders = Object.fromEntries(request.headers.entries());
-  const cookieHeader = request.headers.get('cookie');
-  
-  console.log('🔍 [Middleware] Auth check:', {
-    pathname,
-    url: request.url,
-    origin: request.nextUrl.origin,
-    protocol: request.nextUrl.protocol,
-    hostname: request.nextUrl.hostname,
-    totalCookies: allCookies.length,
-    allCookieNames: allCookies.map(c => c.name),
-    allCookieDetails: allCookies.map(c => ({
-      name: c.name,
-      valueLength: c.value.length,
-      valuePreview: c.value.substring(0, 30) + '...',
-    })),
-    authCookiesCount: authCookies.length,
-    authCookieNames: authCookies.map(c => c.name),
-    authCookieDetails: authCookies.map(c => ({
-      name: c.name,
-      valueLength: c.value.length,
-      valuePreview: c.value.substring(0, 50) + '...',
-      startsWithBase64: c.value.startsWith('base64-'),
-    })),
-    hasSessionCookie: !!sessionCookie,
-    sessionCookieName: sessionCookie?.name,
-    sessionCookieValueLength: sessionCookie?.value?.length || 0,
-    sessionCookieValuePreview: sessionCookie?.value?.substring(0, 50) + '...',
-    sessionCookieStartsWithBase64: sessionCookie?.value?.startsWith('base64-') || false,
-    cookieHeaderLength: cookieHeader?.length || 0,
-    cookieHeaderPreview: cookieHeader?.substring(0, 200) + '...',
-    cookieHeaderCount: cookieHeader ? cookieHeader.split(';').length : 0,
-    requestHeaders: {
-      host: requestHeaders.host,
-      'x-forwarded-host': requestHeaders['x-forwarded-host'],
-      'x-forwarded-proto': requestHeaders['x-forwarded-proto'],
-      'x-forwarded-for': requestHeaders['x-forwarded-for'],
-      'user-agent': requestHeaders['user-agent']?.substring(0, 50) + '...',
-    },
-    supabaseUrl,
-    timestamp: new Date().toISOString(),
-  });
-  
   try {
-    // Try getSession() first, which is more lenient than getUser()
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    
-    if (session && session.user) {
-      user = session.user;
-      console.log('✅ [Middleware] getSession() succeeded:', {
-        pathname,
-        hasUser: !!user,
-        userId: user?.id,
-        sessionExpiresAt: session.expires_at,
-        timestamp: new Date().toISOString(),
-      });
-    } else {
-      // If getSession() fails, try getUser() which validates the token
-      const { data: { user: fetchedUser }, error: fetchedError } = await supabase.auth.getUser();
-      user = fetchedUser;
-      authError = fetchedError as Error | null;
-      
-      console.log('🔍 [Middleware] getUser() result:', {
-        pathname,
-        hasUser: !!user,
-        userId: user?.id,
-        hasError: !!authError,
-        errorMessage: authError?.message,
-        sessionError: sessionError?.message,
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const { data: { user: fetchedUser }, error: fetchedError } = await supabase.auth.getUser();
+    user = fetchedUser;
+    authError = fetchedError as Error | null;
   } catch (error) {
     // User might not be authenticated, continue
     authError = error as Error;
-    console.log('🔍 [Middleware] Auth exception:', {
-      pathname,
-      errorMessage: authError?.message,
-      errorStack: authError?.stack?.substring(0, 200),
-      timestamp: new Date().toISOString(),
-    });
   }
 
   // Auto-redirect based on geo-detection for marketing pages

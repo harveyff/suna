@@ -61,73 +61,18 @@ export async function createClient() {
     {
       cookies: {
         getAll() {
-          const allCookies = cookieStore.getAll();
-          const authCookies = allCookies.filter(c => 
-            c.name.includes('supabase') || 
-            c.name.includes('auth') || 
-            c.name === 'sb-supabase-kong-auth-token'
-          );
-          
-          console.log('🍪 [Supabase Server] Getting cookies:', {
-            totalCookies: allCookies.length,
-            authCookiesCount: authCookies.length,
-            authCookieNames: authCookies.map(c => c.name),
-            timestamp: new Date().toISOString(),
-          });
-          
-          return allCookies;
+          return cookieStore.getAll()
         },
         setAll(cookiesToSet) {
-          // In Route Handlers, cookies().set() works correctly
-          // We need to set cookies so they're available for the response
-          console.log('🍪 [Supabase Server] Setting cookies:', {
-            cookiesCount: cookiesToSet.length,
-            cookieNames: cookiesToSet.map(c => c.name),
-            timestamp: new Date().toISOString(),
-          });
-          
-          cookiesToSet.forEach(({ name, value, options }) => {
-            try {
-              // Ensure cookies have proper options for cross-domain support
-              const cookieOptions = {
-                ...options,
-                // Ensure path is set (default to /)
-                path: options?.path || '/',
-                // Ensure SameSite is set for cross-domain support
-                sameSite: options?.sameSite || ('lax' as const),
-                // Ensure httpOnly is set if specified
-                httpOnly: options?.httpOnly ?? true,
-                // Ensure secure is set based on environment
-                secure: options?.secure ?? (process.env.NODE_ENV === 'production'),
-              };
-              
-              cookieStore.set(name, value, cookieOptions);
-              
-              console.log('✅ [Supabase Server] Cookie set:', {
-                name,
-                valueLength: value?.length || 0,
-                path: cookieOptions.path,
-                sameSite: cookieOptions.sameSite,
-                httpOnly: cookieOptions.httpOnly,
-                secure: cookieOptions.secure,
-                timestamp: new Date().toISOString(),
-              });
-            } catch (error) {
-              // Log error but don't fail - cookies might already be set
-              console.error(`❌ [Supabase Server] Failed to set cookie ${name}:`, {
-                error: error instanceof Error ? error.message : String(error),
-                cookieName: name,
-                valueLength: value?.length || 0,
-                options,
-                timestamp: new Date().toISOString(),
-              });
-            }
-          });
-          
-          console.log('🍪 [Supabase Server] Finished setting cookies:', {
-            totalCookies: cookiesToSet.length,
-            timestamp: new Date().toISOString(),
-          });
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            )
+          } catch {
+            // The `setAll` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing
+            // user sessions.
+          }
         },
       },
     }
