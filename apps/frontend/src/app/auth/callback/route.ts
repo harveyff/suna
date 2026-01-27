@@ -237,6 +237,15 @@ export async function GET(request: NextRequest) {
 </body>
 </html>`;
     
+    // CRITICAL: Manually copy ONLY the essential session cookie to HTML response
+    // In Next.js Route Handlers, cookies().set() doesn't automatically include cookies
+    // in NextResponse() responses. We must manually add them.
+    // But we only copy the session cookie to minimize header size and prevent 502 errors
+    const sessionCookieForResponse = allCookies.find(c => 
+      c.name === 'sb-supabase-kong-auth-token' ||
+      (c.name.includes('supabase') && c.name.includes('auth-token') && !c.name.includes('code-verifier'))
+    );
+    
     console.log('🔍 [AUTH_CALLBACK] Creating HTML redirect response for existing session:', {
       htmlLength: html.length,
       redirectUrl: redirectUrl.toString(),
@@ -261,15 +270,6 @@ export async function GET(request: NextRequest) {
         'Pragma': 'no-cache',
       },
     });
-    
-    // CRITICAL: Manually copy ONLY the essential session cookie to HTML response
-    // In Next.js Route Handlers, cookies().set() doesn't automatically include cookies
-    // in NextResponse() responses. We must manually add them.
-    // But we only copy the session cookie to minimize header size and prevent 502 errors
-    const sessionCookieForResponse = allCookies.find(c => 
-      c.name === 'sb-supabase-kong-auth-token' ||
-      (c.name.includes('supabase') && c.name.includes('auth-token') && !c.name.includes('code-verifier'))
-    );
     
     console.log('🔍 [AUTH_CALLBACK] Copying session cookie to HTML response (existing session):', {
       hasSessionCookie: !!sessionCookieForResponse,
