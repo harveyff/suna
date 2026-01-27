@@ -39,12 +39,36 @@ export function HeroSection() {
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   
   // Close auth dialog and redirect when user logs in
+  // Only redirect if user is actually authenticated (has valid user object)
   useEffect(() => {
-    if (authDialogOpen && user && !isLoading) {
+    // Don't redirect while loading - wait for AuthProvider to fully initialize
+    if (isLoading) {
+      return;
+    }
+    
+    // Only redirect if dialog is open AND user is authenticated
+    if (authDialogOpen && user && user.id) {
+      console.log('🔄 [HeroSection] User logged in, closing dialog and redirecting to dashboard:', {
+        userId: user.id,
+        email: user.email,
+        timestamp: new Date().toISOString(),
+      });
       setAuthDialogOpen(false);
       router.push('/dashboard');
     }
   }, [user, isLoading, authDialogOpen, router]);
+  
+  // Log auth state for debugging
+  useEffect(() => {
+    console.log('🔍 [HeroSection] Auth state:', {
+      isLoading,
+      hasUser: !!user,
+      userId: user?.id,
+      email: user?.email,
+      authDialogOpen,
+      timestamp: new Date().toISOString(),
+    });
+  }, [user, isLoading, authDialogOpen]);
   
   const handleAuthRequired = (pendingMessage: string) => {
     trackCtaSignup();

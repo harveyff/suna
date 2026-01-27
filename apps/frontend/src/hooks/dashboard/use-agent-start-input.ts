@@ -220,10 +220,19 @@ export function useAgentStartInput(options: UseAgentStartInputOptions = {}): Use
     }
     
     // Check auth if required
-    if (requireAuth && !user && !isAuthLoading) {
-      localStorage.setItem(PENDING_PROMPT_KEY, message.trim());
-      onAuthRequired?.(message.trim());
-      return;
+    // Only check if AuthProvider has finished loading to avoid false positives
+    if (requireAuth && !isAuthLoading) {
+      if (!user || !user.id) {
+        console.log(`${logPrefix} Auth required but user not authenticated, calling onAuthRequired:`, {
+          hasUser: !!user,
+          userId: user?.id,
+          isLoading: isAuthLoading,
+          timestamp: new Date().toISOString(),
+        });
+        localStorage.setItem(PENDING_PROMPT_KEY, message.trim());
+        onAuthRequired?.(message.trim());
+        return;
+      }
     }
 
     setIsSubmitting(true);
