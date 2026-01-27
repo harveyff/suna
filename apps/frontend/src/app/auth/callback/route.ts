@@ -13,6 +13,12 @@ import type { NextRequest } from 'next/server'
  */
 
 export async function GET(request: NextRequest) {
+  console.log('🔍 Auth callback route hit:', {
+    url: request.url,
+    pathname: request.nextUrl.pathname,
+    searchParams: Object.fromEntries(request.nextUrl.searchParams),
+  });
+
   const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
   const token = searchParams.get('token') // Supabase verification token
@@ -93,12 +99,51 @@ export async function GET(request: NextRequest) {
     });
 
     try {
-      // For PKCE magic link tokens, we need to exchange them for a session
-      // Try to verify the token and create a session
-      const { data, error } = await supabase.auth.verifyOtp({
-        token_hash: token,
-        type: finalType as any,
-      })
+      // For PKCE magic link tokens, Supabase may return them as "code" in the URL
+      // But sometimes they come as "token" parameter
+      // Try exchangeCodeForSession first (most common for PKCE flow)
+      // If that fails, fall back to verifyOtp
+      
+      let data: any = null;
+      let error: any = null;
+      
+      // First, try exchangeCodeForSession (for PKCE flow)
+      console.log('🔄 Trying exchangeCodeForSession for PKCE token...');
+      const exchangeResult = await supabase.auth.exchangeCodeForSession(token);
+      
+      if (exchangeResult.error) {
+        console.log('⚠️ exchangeCodeForSession failed, trying verifyOtp:', exchangeResult.error.message);
+        
+        // Fall back to verifyOtp with token_hash
+        const verifyResult = await supabase.auth.verifyOtp({
+          token_hash: token,
+          type: finalType as any,
+        });
+        
+        if (verifyResult.error) {
+          console.log('⚠️ verifyOtp with token_hash failed, trying token directly:', verifyResult.error.message);
+          
+          // Last resort: try verifyOtp with token (not token_hash)
+          const verifyResult2 = await supabase.auth.verifyOtp({
+            token: token,
+            type: finalType as any,
+          });
+          
+          if (verifyResult2.error) {
+            error = verifyResult2.error;
+            console.error('❌ All verification methods failed');
+          } else {
+            data = verifyResult2.data;
+            console.log('✅ verifyOtp with token succeeded');
+          }
+        } else {
+          data = verifyResult.data;
+          console.log('✅ verifyOtp with token_hash succeeded');
+        }
+      } else {
+        data = exchangeResult.data;
+        console.log('✅ exchangeCodeForSession succeeded');
+      }
 
       if (error) {
         console.error('❌ Error verifying token:', error)
@@ -127,7 +172,7 @@ export async function GET(request: NextRequest) {
       }
 
       // Token verified successfully, redirect to dashboard
-      if (data.user) {
+      if (data && data.user) {
         // Determine if this is a new user (for analytics tracking)
         const createdAt = new Date(data.user.created_at).getTime();
         const now = Date.now();
@@ -188,15 +233,48 @@ export async function GET(request: NextRequest) {
         });
         
         return redirectResponse
+      } else {
+        // Token verification succeeded but no user data returned
+        console.error('⚠️ Token verification succeeded but no user data:', {
+          hasData: !!data,
+          dataKeys: data ? Object.keys(data) : [],
+        });
+        
+        // Redirect to auth page with error
+        const errorUrl = new URL(`${baseUrl}/auth`);
+        errorUrl.searchParams.set('error', 'Token verification succeeded but no user data returned');
+        if (next) errorUrl.searchParams.set('returnUrl', next);
+        
+        return NextResponse.redirect(errorUrl);
       }
     } catch (error: any) {
-      console.error('❌ Unexpected error verifying token:', error)
+      console.error('❌ Unexpected error verifying token:', {
+        error: error?.message || error,
+        errorDetail: error?.detail || error?.response?.data || error,
+        stack: error?.stack,
+        tokenPrefix: token?.substring(0, 20),
+        type: finalType,
+      });
+      
+      // If error contains "Not Found", it might be a routing issue
+      // Try to provide more helpful error message
+      const errorMessage = error?.detail || error?.message || 'Unknown error';
+      const isNotFound = errorMessage.includes('Not Found') || errorMessage.includes('404');
+      
+      if (isNotFound) {
+        console.error('⚠️ "Not Found" error - this might indicate:');
+        console.error('   1. Supabase API endpoint issue');
+        console.error('   2. Token format incorrect');
+        console.error('   3. Route not properly deployed');
+      }
+      
       // Fallback: redirect to auth page with token for client-side handling
       const verifyUrl = new URL(`${baseUrl}/auth`)
       verifyUrl.searchParams.set('token', token)
       verifyUrl.searchParams.set('type', finalType)
       if (termsAccepted) verifyUrl.searchParams.set('terms_accepted', 'true')
       if (next) verifyUrl.searchParams.set('returnUrl', next)
+      if (errorMessage) verifyUrl.searchParams.set('error', encodeURIComponent(errorMessage))
       
       return NextResponse.redirect(verifyUrl)
     }

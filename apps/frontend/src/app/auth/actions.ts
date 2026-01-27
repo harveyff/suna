@@ -21,7 +21,8 @@ export async function signIn(prevState: any, formData: FormData) {
 
   // Use magic link (passwordless) authentication
   // For desktop app, use custom protocol (kortix://auth/callback) - same as mobile
-  // For web, use standard origin (https://kortix.com/auth/callback)
+  // For web, prioritize server-side public URL (from env vars) over client origin
+  // This ensures email links use the correct public domain, not internal addresses
   // Include email in redirect URL so it's available if the link expires
   let emailRedirectTo: string;
   if (isDesktopApp && origin.startsWith('kortix://')) {
@@ -32,7 +33,11 @@ export async function signIn(prevState: any, formData: FormData) {
     }
     emailRedirectTo = `kortix://auth/callback${params.toString() ? `?${params.toString()}` : ''}`;
   } else {
-    emailRedirectTo = `${origin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
+    // Priority: server-side env var > client origin
+    const publicUrl = process.env.NEXT_PUBLIC_URL || process.env.FRONTEND_PUBLIC_URL || origin;
+    const finalOrigin = publicUrl.trim() !== '' ? publicUrl : origin;
+    
+    emailRedirectTo = `${finalOrigin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
   }
 
   const { error } = await supabase.auth.signInWithOtp({
@@ -76,7 +81,8 @@ export async function signUp(prevState: any, formData: FormData) {
 
   // Use magic link (passwordless) authentication - auto-creates account
   // For desktop app, use custom protocol (kortix://auth/callback) - same as mobile
-  // For web, use standard origin (https://kortix.com/auth/callback)
+  // For web, prioritize server-side public URL (from env vars) over client origin
+  // This ensures email links use the correct public domain, not internal addresses
   // Include email in redirect URL so it's available if the link expires
   let emailRedirectTo: string;
   if (isDesktopApp && origin.startsWith('kortix://')) {
@@ -87,7 +93,20 @@ export async function signUp(prevState: any, formData: FormData) {
     }
     emailRedirectTo = `kortix://auth/callback${params.toString() ? `?${params.toString()}` : ''}`;
   } else {
-    emailRedirectTo = `${origin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
+    // Priority: server-side env var > client origin
+    // This ensures we use the public domain, not internal addresses like supabase-kong
+    const publicUrl = process.env.NEXT_PUBLIC_URL || process.env.FRONTEND_PUBLIC_URL || origin;
+    const finalOrigin = publicUrl.trim() !== '' ? publicUrl : origin;
+    
+    emailRedirectTo = `${finalOrigin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
+    
+    console.log('📧 Setting emailRedirectTo:', {
+      publicUrl: process.env.NEXT_PUBLIC_URL || 'not set',
+      frontendPublicUrl: process.env.FRONTEND_PUBLIC_URL || 'not set',
+      clientOrigin: origin,
+      finalOrigin,
+      emailRedirectTo,
+    });
   }
 
   const { error } = await supabase.auth.signInWithOtp({
@@ -181,7 +200,8 @@ export async function resendMagicLink(prevState: any, formData: FormData) {
 
   // Use magic link (passwordless) authentication
   // For desktop app, use custom protocol (kortix://auth/callback) - same as mobile
-  // For web, use standard origin (https://kortix.com/auth/callback)
+  // For web, prioritize server-side public URL (from env vars) over client origin
+  // This ensures email links use the correct public domain, not internal addresses
   // Include email in redirect URL so it's available if the link expires
   let emailRedirectTo: string;
   if (isDesktopApp && origin.startsWith('kortix://')) {
@@ -192,7 +212,11 @@ export async function resendMagicLink(prevState: any, formData: FormData) {
     }
     emailRedirectTo = `kortix://auth/callback${params.toString() ? `?${params.toString()}` : ''}`;
   } else {
-    emailRedirectTo = `${origin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
+    // Priority: server-side env var > client origin
+    const publicUrl = process.env.NEXT_PUBLIC_URL || process.env.FRONTEND_PUBLIC_URL || origin;
+    const finalOrigin = publicUrl.trim() !== '' ? publicUrl : origin;
+    
+    emailRedirectTo = `${finalOrigin}/auth/callback?returnUrl=${encodeURIComponent(returnUrl || '/dashboard')}&email=${encodeURIComponent(normalizedEmail)}${acceptedTerms ? '&terms_accepted=true' : ''}`;
   }
 
   const { error } = await supabase.auth.signInWithOtp({
