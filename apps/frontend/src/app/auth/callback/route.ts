@@ -71,6 +71,26 @@ export async function GET(request: NextRequest) {
 
   const supabase = await createClient()
 
+  // Check if user is already authenticated before processing tokens
+  // This prevents unnecessary token processing if user already has a session
+  const { data: { session: existingSession } } = await supabase.auth.getSession();
+  if (existingSession?.user && (token || code)) {
+    console.log('✅ [AUTH_CALLBACK] User already authenticated, redirecting to dashboard:', {
+      userId: existingSession.user.id,
+      email: existingSession.user.email,
+      hadToken: !!token,
+      hadCode: !!code,
+      returnUrl: next,
+      timestamp: new Date().toISOString(),
+    });
+    
+    // User already authenticated, redirect directly to dashboard
+    const redirectUrl = new URL(next, baseUrl);
+    redirectUrl.searchParams.set('auth_event', 'login');
+    redirectUrl.searchParams.set('auth_method', 'existing_session');
+    return NextResponse.redirect(redirectUrl);
+  }
+
   // Handle token-based verification (email confirmation, PKCE magic links, etc.)
   // Supabase sends these to the redirect URL for processing
   if (token && type) {
