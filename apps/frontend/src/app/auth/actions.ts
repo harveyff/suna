@@ -328,15 +328,23 @@ export async function verifyOtp(prevState: any, formData: FormData) {
     return { message: error.message || 'Invalid or expired code' };
   }
 
+  // Verify session is set after OTP verification
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    return { message: 'Session not created after verification. Please try again.' };
+  }
+
   // Determine if new user (for analytics)
   const isNewUser = data.user && (Date.now() - new Date(data.user.created_at).getTime()) < 60000;
   const authEvent = isNewUser ? 'signup' : 'login';
 
-  // Return success - let the client handle the redirect
-  return {
-    success: true,
-    authEvent,
-    authMethod: 'email_otp',
-    redirectTo: returnUrl || '/dashboard',
-  };
+  // Use server-side redirect to ensure clean URL without token parameters
+  // This prevents middleware from detecting token params and redirecting again
+  const finalReturnUrl = returnUrl || '/dashboard';
+  const redirectUrl = new URL(finalReturnUrl, 'http://localhost');
+  redirectUrl.searchParams.set('auth_event', authEvent);
+  redirectUrl.searchParams.set('auth_method', 'email_otp');
+  
+  // Server-side redirect ensures clean URL and proper session handling
+  redirect(`${redirectUrl.pathname}${redirectUrl.search}`);
 }

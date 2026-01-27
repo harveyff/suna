@@ -239,6 +239,9 @@ function LoginContent() {
 
     const result = await verifyOtp(prevState, formData);
 
+    // If verifyOtp returns a result (error case), handle it
+    // If verifyOtp redirects successfully, it will throw a NEXT_REDIRECT error
+    // which Next.js handles automatically, so we won't reach here
     if (result && typeof result === 'object') {
       if ('message' in result) {
         toast.error('Verification failed', {
@@ -247,19 +250,11 @@ function LoginContent() {
         });
         return {};
       }
-
-      if ('success' in result && result.success) {
-        // Full page reload to ensure AuthProvider re-initializes with new session cookies
-        // router.replace() is client-side and won't refresh the AuthProvider state
-        const redirectTo = (result as any).redirectTo || '/dashboard';
-        const authEvent = (result as any).authEvent || 'login';
-        const authMethod = (result as any).authMethod || 'email_otp';
-        window.location.href = `${redirectTo}?auth_event=${authEvent}&auth_method=${authMethod}`;
-        return result;
-      }
     }
 
-    return result;
+    // If we reach here, verification succeeded but redirect didn't happen
+    // This shouldn't happen if redirect() is called, but handle it just in case
+    return {};
   };
 
   // Don't show expired view if user is logged in or still loading
