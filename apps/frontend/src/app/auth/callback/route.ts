@@ -100,14 +100,16 @@ export async function GET(request: NextRequest) {
     console.error('❌ Auth callback error:', error, errorCode, errorDescription)
 
     // Check if the error is due to expired/invalid link
+    // Only mark as expired if explicitly stated in error code or message
     const isExpiredOrInvalid =
       errorCode === 'otp_expired' ||
       errorCode === 'expired_token' ||
       errorCode === 'token_expired' ||
-      error?.toLowerCase().includes('expired') ||
-      error?.toLowerCase().includes('invalid') ||
-      errorDescription?.toLowerCase().includes('expired') ||
-      errorDescription?.toLowerCase().includes('invalid')
+      errorCode === 'flow_state_not_found' || // PKCE flow expired
+      (error?.toLowerCase().includes('expired') && !error?.toLowerCase().includes('not expired')) ||
+      (error?.toLowerCase().includes('invalid') && (error?.toLowerCase().includes('token') || error?.toLowerCase().includes('link'))) ||
+      (errorDescription?.toLowerCase().includes('expired') && !errorDescription?.toLowerCase().includes('not expired')) ||
+      (errorDescription?.toLowerCase().includes('invalid') && (errorDescription?.toLowerCase().includes('token') || errorDescription?.toLowerCase().includes('link')))
 
     if (isExpiredOrInvalid) {
       // Redirect to auth page with expired state to show resend form
@@ -180,13 +182,15 @@ export async function GET(request: NextRequest) {
           }
           
           // Check if expired/invalid
+          // Only mark as expired if explicitly stated in error code or message
+          // Don't use error.status === 400 as it's too broad (many errors are 400)
           const isExpired = 
-            error.message?.toLowerCase().includes('expired') ||
-            error.message?.toLowerCase().includes('invalid') ||
-            error.status === 400 ||
             error.code === 'expired_token' ||
             error.code === 'token_expired' ||
-            error.code === 'otp_expired';
+            error.code === 'otp_expired' ||
+            error.code === 'flow_state_not_found' || // PKCE flow expired
+            (error.message?.toLowerCase().includes('expired') && !error.message?.toLowerCase().includes('not expired')) ||
+            (error.message?.toLowerCase().includes('invalid') && error.message?.toLowerCase().includes('token'));
           
           if (isExpired) {
             const expiredUrl = new URL(`${baseUrl}/auth`, baseUrl);
@@ -242,13 +246,15 @@ export async function GET(request: NextRequest) {
         console.error('❌ Error exchanging code for session:', error)
         
         // Check if the error is due to expired/invalid link
+        // Only mark as expired if explicitly stated in error code or message
+        // Don't use error.status === 400 as it's too broad (many errors are 400)
         const isExpired = 
-          error.message?.toLowerCase().includes('expired') ||
-          error.message?.toLowerCase().includes('invalid') ||
-          error.status === 400 ||
           error.code === 'expired_token' ||
           error.code === 'token_expired' ||
-          error.code === 'otp_expired'
+          error.code === 'otp_expired' ||
+          error.code === 'flow_state_not_found' || // PKCE flow expired
+          (error.message?.toLowerCase().includes('expired') && !error.message?.toLowerCase().includes('not expired')) ||
+          (error.message?.toLowerCase().includes('invalid') && error.message?.toLowerCase().includes('token'))
         
         if (isExpired) {
           // Redirect to auth page with expired state to show resend form
