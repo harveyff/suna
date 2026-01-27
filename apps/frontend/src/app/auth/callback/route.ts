@@ -227,7 +227,33 @@ export async function GET(request: NextRequest) {
       },
     });
     
-    // Log cookies that will be included in response
+    // CRITICAL: Manually copy cookies to HTML response
+    // In Next.js Route Handlers, cookies().set() doesn't automatically include cookies
+    // in NextResponse() responses. We must manually add them.
+    console.log('🔍 [AUTH_CALLBACK] Copying cookies to HTML response (existing session):', {
+      cookiesToCopy: allCookies.length,
+      cookieNames: allCookies.map(c => c.name),
+      timestamp: new Date().toISOString(),
+    });
+    
+    allCookies.forEach((cookie) => {
+      try {
+        htmlResponse.cookies.set(cookie.name, cookie.value, {
+          path: '/',
+          sameSite: 'lax' as const,
+          httpOnly: cookie.name.includes('auth-token') && !cookie.name.includes('code-verifier'),
+          secure: process.env.NODE_ENV === 'production',
+        });
+      } catch (error) {
+        console.error(`❌ [AUTH_CALLBACK] Failed to copy cookie ${cookie.name}:`, {
+          error: error instanceof Error ? error.message : String(error),
+          cookieName: cookie.name,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+    
+    // Log cookies that are now included in response
     const responseCookies = htmlResponse.cookies.getAll();
     console.log('🔍 [AUTH_CALLBACK] Cookies in HTML response (existing session):', {
       cookiesCount: responseCookies.length,
@@ -454,7 +480,37 @@ export async function GET(request: NextRequest) {
               },
             });
             
-            // Log cookies that will be included in response
+            // CRITICAL: Manually copy cookies to HTML response
+            // In Next.js Route Handlers, cookies().set() doesn't automatically include cookies
+            // in NextResponse() responses. We must manually add them.
+            const { cookies: expiredCookies } = await import('next/headers');
+            const expiredCookieStore = await expiredCookies();
+            const expiredAllCookies = expiredCookieStore.getAll();
+            
+            console.log('🔍 [AUTH_CALLBACK] Copying cookies to HTML response (expired token):', {
+              cookiesToCopy: expiredAllCookies.length,
+              cookieNames: expiredAllCookies.map(c => c.name),
+              timestamp: new Date().toISOString(),
+            });
+            
+            expiredAllCookies.forEach((cookie) => {
+              try {
+                htmlResponse.cookies.set(cookie.name, cookie.value, {
+                  path: '/',
+                  sameSite: 'lax' as const,
+                  httpOnly: cookie.name.includes('auth-token') && !cookie.name.includes('code-verifier'),
+                  secure: process.env.NODE_ENV === 'production',
+                });
+              } catch (error) {
+                console.error(`❌ [AUTH_CALLBACK] Failed to copy cookie ${cookie.name}:`, {
+                  error: error instanceof Error ? error.message : String(error),
+                  cookieName: cookie.name,
+                  timestamp: new Date().toISOString(),
+                });
+              }
+            });
+            
+            // Log cookies that are now included in response
             const responseCookies = htmlResponse.cookies.getAll();
             console.log('🔍 [AUTH_CALLBACK] Cookies in HTML response (expired token):', {
               cookiesCount: responseCookies.length,
@@ -465,9 +521,6 @@ export async function GET(request: NextRequest) {
               })),
               timestamp: new Date().toISOString(),
             });
-            
-            // Cookies are already set via cookies().set() in createClient() above
-            // They will be automatically included in this HTML response
             
             const totalDuration = Date.now() - requestStartTime;
             console.log('✅ [AUTH_CALLBACK] HTML redirect response created for expired token:', {
@@ -668,7 +721,33 @@ export async function GET(request: NextRequest) {
           },
         });
         
-        // Log cookies that will be included in response
+        // CRITICAL: Manually copy cookies to HTML response
+        // In Next.js Route Handlers, cookies().set() doesn't automatically include cookies
+        // in NextResponse() responses. We must manually add them.
+        console.log('🔍 [AUTH_CALLBACK] Copying cookies to HTML response (token verified):', {
+          cookiesToCopy: allCookies.length,
+          cookieNames: allCookies.map(c => c.name),
+          timestamp: new Date().toISOString(),
+        });
+        
+        allCookies.forEach((cookie) => {
+          try {
+            htmlResponse.cookies.set(cookie.name, cookie.value, {
+              path: '/',
+              sameSite: 'lax' as const,
+              httpOnly: cookie.name.includes('auth-token') && !cookie.name.includes('code-verifier'),
+              secure: process.env.NODE_ENV === 'production',
+            });
+          } catch (error) {
+            console.error(`❌ [AUTH_CALLBACK] Failed to copy cookie ${cookie.name}:`, {
+              error: error instanceof Error ? error.message : String(error),
+              cookieName: cookie.name,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        });
+        
+        // Log cookies that are now included in response
         const responseCookies = htmlResponse.cookies.getAll();
         console.log('🔍 [AUTH_CALLBACK] Cookies in HTML response (token verified):', {
           cookiesCount: responseCookies.length,
