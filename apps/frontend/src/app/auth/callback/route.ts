@@ -21,6 +21,18 @@ export async function GET(request: NextRequest) {
   const termsAccepted = searchParams.get('terms_accepted') === 'true'
   const email = searchParams.get('email') || '' // Email passed from magic link redirect URL
 
+  console.log('🔍 [AUTH_CALLBACK] Request received:', {
+    hasCode: !!code,
+    hasToken: !!token,
+    hasType: !!type,
+    type,
+    returnUrl: next,
+    email,
+    termsAccepted,
+    fullUrl: request.url,
+    timestamp: new Date().toISOString(),
+  });
+
   // Calculate correct base URL from headers (handles proxy environments)
   // This ensures we use the external URL, not internal 0.0.0.0:3000
   const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('X-Forwarded-Host')
@@ -37,6 +49,15 @@ export async function GET(request: NextRequest) {
   } else {
     baseUrl = request.nextUrl.origin || process.env.NEXT_PUBLIC_URL || 'http://localhost:3000'
   }
+  
+  console.log('🌐 [AUTH_CALLBACK] Base URL calculated:', {
+    forwardedHost,
+    forwardedProto,
+    host,
+    calculatedBaseUrl: baseUrl,
+    timestamp: new Date().toISOString(),
+  });
+  
   const error = searchParams.get('error')
   const errorCode = searchParams.get('error_code')
   const errorDescription = searchParams.get('error_description')

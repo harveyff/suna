@@ -153,17 +153,28 @@ export default function DashboardLayoutContent({
   // Wait a bit for AuthProvider to fully initialize and read session cookies
   // This prevents redirect loops when session cookies are being set
   useEffect(() => {
+    const currentPath = typeof window !== 'undefined' ? window.location.pathname : 'unknown';
+    const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
+    const allCookies = typeof document !== 'undefined' ? document.cookie : '';
+    const authCookies = typeof document !== 'undefined' 
+      ? document.cookie.split(';').filter(c => c.trim().startsWith('sb-')).map(c => c.trim().split('=')[0])
+      : [];
+    
     console.log('🔍 [Dashboard] Auth check:', {
       isLoading,
       hasUser: !!user,
       userId: user?.id,
-      pathname: typeof window !== 'undefined' ? window.location.pathname : 'unknown',
+      email: user?.email,
+      pathname: currentPath,
+      search: currentSearch,
+      authCookies,
       timestamp: new Date().toISOString(),
     });
 
     // Don't redirect while loading - AuthProvider is still initializing
     if (isLoading) {
       console.log('⏳ [Dashboard] AuthProvider still loading, waiting...', {
+        pathname: currentPath,
         timestamp: new Date().toISOString(),
       });
       return;
@@ -174,6 +185,7 @@ export default function DashboardLayoutContent({
       console.log('✅ [Dashboard] User authenticated, staying on dashboard', {
         userId: user.id,
         email: user.email,
+        pathname: currentPath,
         timestamp: new Date().toISOString(),
       });
       return;
@@ -188,7 +200,9 @@ export default function DashboardLayoutContent({
     
     console.log('⚠️ [Dashboard] User not authenticated, checking cookies:', {
       hasAuthCookie,
-      cookieString: typeof document !== 'undefined' ? document.cookie.substring(0, 200) : 'N/A',
+      authCookies,
+      cookieString: typeof document !== 'undefined' ? document.cookie.substring(0, 300) : 'N/A',
+      pathname: currentPath,
       timestamp: new Date().toISOString(),
     });
     
@@ -197,6 +211,8 @@ export default function DashboardLayoutContent({
       // Don't redirect immediately - this prevents redirect loops when middleware redirects authenticated users
       // The effect will re-run when user changes, and if user is still null after a delay, we'll check again
       console.log('⏳ [Dashboard] Auth cookies found but user is null - AuthProvider may still be initializing, not redirecting', {
+        pathname: currentPath,
+        authCookies,
         timestamp: new Date().toISOString(),
       });
       // Don't redirect - let AuthProvider initialize
@@ -204,6 +220,7 @@ export default function DashboardLayoutContent({
     } else {
       // No auth cookies, user is definitely not authenticated
       console.log('❌ [Dashboard] No auth cookies found, redirecting to /auth', {
+        pathname: currentPath,
         timestamp: new Date().toISOString(),
       });
       router.push('/auth');

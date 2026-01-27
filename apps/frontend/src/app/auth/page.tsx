@@ -81,6 +81,17 @@ function LoginContent() {
   // Client-side redirect here can cause redirect loops when middleware already redirected
   // If user reaches this page, they should see the auth form (middleware will redirect if authenticated)
   useEffect(() => {
+    console.log('🔍 [Auth Page] Auth state check:', {
+      isLoading,
+      hasUser: !!user,
+      userId: user?.id,
+      email: user?.email,
+      returnUrl,
+      currentPath: typeof window !== 'undefined' ? window.location.pathname : 'unknown',
+      searchParams: typeof window !== 'undefined' ? window.location.search : 'N/A',
+      timestamp: new Date().toISOString(),
+    });
+    
     // Only log, don't redirect - middleware handles authenticated user redirects
     if (!isLoading && user) {
       console.log('⚠️ [Auth Page] User authenticated but reached auth page - middleware should have redirected:', {

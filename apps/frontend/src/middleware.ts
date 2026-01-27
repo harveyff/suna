@@ -77,6 +77,13 @@ function detectMobilePlatformFromUA(userAgent: string | null): 'ios' | 'android'
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   
+  console.log('🔍 [Middleware] Request received:', {
+    pathname,
+    method: request.method,
+    url: request.url,
+    timestamp: new Date().toISOString(),
+  });
+  
   // 🚀 HYPER-FAST: Mobile app store redirect for /milano, /berlin, and /app
   // This runs at the edge before ANY page rendering
   if (pathname === '/milano' || pathname === '/berlin' || pathname === '/app') {
@@ -102,6 +109,7 @@ export async function middleware(request: NextRequest) {
     pathname.includes('.') ||
     pathname.startsWith('/api/')
   ) {
+    console.log('⏭️ [Middleware] Skipping static/API route:', { pathname, timestamp: new Date().toISOString() });
     return NextResponse.next();
   }
 
@@ -376,13 +384,39 @@ export async function middleware(request: NextRequest) {
   let user: { id: string; user_metadata?: { locale?: string } } | null = null;
   let authError: Error | null = null;
   
+  // Check cookies before fetching user
+  const hasAuthCookie = request.cookies.has('sb-supabase-kong-auth-token') || 
+                        request.cookies.has('sb-2f5c36de-auth-token') ||
+                        request.cookies.has('sb-demo-auth-token');
+  
+  console.log('🔍 [Middleware] Checking authentication:', {
+    pathname,
+    hasAuthCookie,
+    cookieNames: request.cookies.getAll().map(c => c.name).filter(name => name.startsWith('sb-')),
+    timestamp: new Date().toISOString(),
+  });
+  
   try {
     const { data: { user: fetchedUser }, error: fetchedError } = await supabase.auth.getUser();
     user = fetchedUser;
     authError = fetchedError as Error | null;
+    
+    console.log('🔍 [Middleware] getUser() result:', {
+      pathname,
+      hasUser: !!user,
+      userId: user?.id,
+      hasError: !!authError,
+      errorMessage: authError?.message,
+      timestamp: new Date().toISOString(),
+    });
   } catch (error) {
     // User might not be authenticated, continue
     authError = error as Error;
+    console.error('❌ [Middleware] Error fetching user:', {
+      pathname,
+      error: error instanceof Error ? error.message : String(error),
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // Auto-redirect based on geo-detection for marketing pages
@@ -437,12 +471,41 @@ export async function middleware(request: NextRequest) {
   try {
     
     // Redirect to auth if not authenticated (using the user we already fetched)
+    // BUT: If auth cookie exists, don't redirect immediately - session might still be initializing
     if (authError || !user) {
+      if (hasAuthCookie) {
+        // Cookie exists but user is null - session might still be initializing
+        // Allow access to let AuthProvider handle it client-side
+        console.log('⏳ [Middleware] Auth cookie exists but user is null, allowing access (session may be initializing):', {
+          pathname,
+          hasAuthCookie: true,
+          hasError: !!authError,
+          errorMessage: authError?.message,
+          cookieNames: request.cookies.getAll().map(c => c.name).filter(name => name.startsWith('sb-')),
+          timestamp: new Date().toISOString(),
+        });
+        return supabaseResponse;
+      }
+      
+      // No cookie and no user - definitely not authenticated
       const url = request.nextUrl.clone();
       url.pathname = '/auth';
       url.searchParams.set('redirect', pathname);
+      console.log('🔄 [Middleware] No auth cookie and no user, redirecting to /auth:', {
+        pathname,
+        hasError: !!authError,
+        errorMessage: authError?.message,
+        timestamp: new Date().toISOString(),
+      });
       return NextResponse.redirect(url);
     }
+    
+    console.log('✅ [Middleware] User authenticated, allowing access:', {
+      pathname,
+      userId: user.id,
+      email: user.email,
+      timestamp: new Date().toISOString(),
+    });
 
     // Skip billing checks in local mode
     const isLocalMode = process.env.NEXT_PUBLIC_ENV_MODE?.toLowerCase() === 'local'

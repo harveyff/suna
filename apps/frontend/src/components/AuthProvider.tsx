@@ -85,22 +85,51 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
+        console.log('🔄 [AuthProvider] Auth state change event:', {
+          event,
+          hasSession: !!newSession,
+          hasUser: !!newSession?.user,
+          userId: newSession?.user?.id,
+          email: newSession?.user?.email,
+          timestamp: new Date().toISOString(),
+        });
+        
         setSession(newSession);
         setUser(newSession?.user ?? null);
 
         if (isLoading) setIsLoading(false);
         switch (event) {
           case 'SIGNED_IN':
+            console.log('✅ [AuthProvider] User signed in:', {
+              userId: newSession?.user?.id,
+              email: newSession?.user?.email,
+              timestamp: new Date().toISOString(),
+            });
             // Auth tracking handled by AuthEventTracker component via URL params
             break;
           case 'SIGNED_OUT':
+            console.log('🚪 [AuthProvider] User signed out:', {
+              timestamp: new Date().toISOString(),
+            });
             clearUserLocalStorage();
             break;
           case 'TOKEN_REFRESHED':
+            console.log('🔄 [AuthProvider] Token refreshed:', {
+              userId: newSession?.user?.id,
+              timestamp: new Date().toISOString(),
+            });
             break;
           case 'MFA_CHALLENGE_VERIFIED':
+            console.log('✅ [AuthProvider] MFA challenge verified:', {
+              userId: newSession?.user?.id,
+              timestamp: new Date().toISOString(),
+            });
             break;
           default:
+            console.log('ℹ️ [AuthProvider] Unhandled auth event:', {
+              event,
+              timestamp: new Date().toISOString(),
+            });
         }
       },
     );
