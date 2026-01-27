@@ -238,33 +238,20 @@ export async function GET(request: NextRequest) {
         redirectUrl.searchParams.set('auth_method', authMethod)
         
         // Create redirect response
-        // IMPORTANT: In Next.js, cookies set via cookies().set() are NOT automatically included
-        // in NextResponse.redirect(). We must explicitly copy cookies to the redirect response.
+        // In Next.js App Router, cookies set via cookies().set() should be automatically included
+        // in responses. However, for redirects, we need to ensure cookies are explicitly set.
+        // The createServerClient's setAll method should have already set cookies via cookieStore.set(),
+        // but we'll create the redirect response which should include them.
+        const redirectResponse = NextResponse.redirect(redirectUrl)
+        
+        // Log cookie information for debugging
         const { cookies } = await import('next/headers');
         const cookieStore = await cookies();
         const allCookies = cookieStore.getAll();
         
-        const redirectResponse = NextResponse.redirect(redirectUrl)
-        
-        // Explicitly copy all cookies to the redirect response
-        // This ensures cookies are available when the browser follows the redirect
-        allCookies.forEach((cookie) => {
-          redirectResponse.cookies.set(cookie.name, cookie.value, {
-            path: cookie.path || '/',
-            domain: cookie.domain,
-            maxAge: cookie.maxAge,
-            expires: cookie.expires,
-            httpOnly: cookie.httpOnly,
-            secure: cookie.secure,
-            sameSite: cookie.sameSite as 'strict' | 'lax' | 'none' | undefined,
-          });
-        });
-        
-        // Log cookie information for debugging
         console.log('✅ Token verified successfully, redirecting to:', redirectUrl.toString(), {
           cookiesCount: allCookies.length,
           cookieNames: allCookies.map(c => c.name).filter(name => name.includes('supabase') || name.includes('auth')),
-          cookiesSet: redirectResponse.cookies.getAll().map(c => c.name).filter(name => name.includes('supabase') || name.includes('auth')),
         });
         
         return redirectResponse
