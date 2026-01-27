@@ -123,48 +123,68 @@ export async function GET(request: NextRequest) {
       token: token.substring(0, 20) + '...',
       type: finalType,
       hasReturnUrl: !!next,
+      isPkceToken: token.startsWith('pkce_'),
     });
 
     try {
-      // For PKCE magic link tokens, Supabase may return them as "code" in the URL
-      // But sometimes they come as "token" parameter
-      // Try exchangeCodeForSession first (most common for PKCE flow)
-      // If that fails, fall back to verifyOtp
+      // Check if this is a PKCE token (starts with "pkce_")
+      // PKCE tokens should be handled as "code" for exchangeCodeForSession
+      // But if exchangeCodeForSession fails (no code verifier), fall back to verifyOtp
       
       let data: any = null;
       let error: any = null;
       
-      // First, try exchangeCodeForSession (for PKCE flow)
-      // This is the standard method for PKCE magic link tokens
-      console.log('🔄 Trying exchangeCodeForSession for PKCE token...');
-      const exchangeResult = await supabase.auth.exchangeCodeForSession(token);
-      
-      if (exchangeResult.error) {
-        console.log('⚠️ exchangeCodeForSession failed, trying verifyOtp with token_hash:', exchangeResult.error.message);
+      // For PKCE tokens (starting with "pkce_"), try exchangeCodeForSession first
+      // This requires code verifier stored in cookies (set by @supabase/ssr)
+      if (token.startsWith('pkce_')) {
+        console.log('🔄 PKCE token detected, trying exchangeCodeForSession...');
+        const exchangeResult = await supabase.auth.exchangeCodeForSession(token);
         
-        // Fall back to verifyOtp with token_hash
-        // For PKCE tokens, we use token_hash (not token + email)
+        if (exchangeResult.error) {
+          console.log('⚠️ exchangeCodeForSession failed (code verifier may be missing), trying verifyOtp:', exchangeResult.error.message);
+          
+          // Fall back to verifyOtp - PKCE tokens can also be verified with token_hash
+          // This works even if code verifier is missing
+          const verifyResult = await supabase.auth.verifyOtp({
+            token_hash: token,
+            type: finalType as any,
+          });
+          
+          if (verifyResult.error) {
+            error = verifyResult.error;
+            console.error('❌ Both PKCE verification methods failed:', {
+              exchangeError: exchangeResult.error.message,
+              verifyError: verifyResult.error.message,
+              tokenPrefix: token.substring(0, 20),
+              type: finalType,
+            });
+          } else {
+            data = verifyResult.data;
+            console.log('✅ verifyOtp with token_hash succeeded for PKCE token');
+          }
+        } else {
+          data = exchangeResult.data;
+          console.log('✅ exchangeCodeForSession succeeded for PKCE token');
+        }
+      } else {
+        // Non-PKCE token - use verifyOtp directly
+        console.log('🔄 Non-PKCE token detected, using verifyOtp...');
         const verifyResult = await supabase.auth.verifyOtp({
           token_hash: token,
           type: finalType as any,
         });
         
         if (verifyResult.error) {
-          // Both methods failed - this token format is not supported
           error = verifyResult.error;
-          console.error('❌ All verification methods failed:', {
-            exchangeError: exchangeResult.error.message,
+          console.error('❌ verifyOtp failed:', {
             verifyError: verifyResult.error.message,
             tokenPrefix: token.substring(0, 20),
             type: finalType,
           });
         } else {
           data = verifyResult.data;
-          console.log('✅ verifyOtp with token_hash succeeded');
+          console.log('✅ verifyOtp succeeded');
         }
-      } else {
-        data = exchangeResult.data;
-        console.log('✅ exchangeCodeForSession succeeded');
       }
 
       if (error) {
@@ -242,8 +262,9 @@ export async function GET(request: NextRequest) {
         redirectUrl.searchParams.set('auth_event', authEvent)
         redirectUrl.searchParams.set('auth_method', authMethod)
         
-        // Create redirect response
-        const redirectResponse = NextResponse.redirect(redirectUrl)
+        // Create redirect response with proper status code
+        // Use 307 (Temporary Redirect) instead of default 302 to preserve POST method and cookies
+        const redirectResponse = NextResponse.redirect(redirectUrl, { status: 307 })
         
         // CRITICAL: In Next.js App Router Route Handlers, cookies set via cookies().set() 
         // are NOT automatically included in NextResponse.redirect() responses.
@@ -252,6 +273,11 @@ export async function GET(request: NextRequest) {
         allCookies.forEach((cookie) => {
           redirectResponse.cookies.set(cookie.name, cookie.value);
         });
+        
+        // Set additional headers to prevent caching issues
+        redirectResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+        redirectResponse.headers.set('Pragma', 'no-cache');
+        redirectResponse.headers.set('Expires', '0');
         
         console.log('✅ Token verified successfully, redirecting to:', redirectUrl.toString(), {
           cookiesCount: allCookies.length,
