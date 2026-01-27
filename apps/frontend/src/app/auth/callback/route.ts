@@ -509,141 +509,81 @@ export async function GET(request: NextRequest) {
           timestamp: new Date().toISOString(),
         });
         
-        // Create redirect response with proper status code
-        // Use 307 (Temporary Redirect) instead of default 302 to preserve POST method and cookies
-        const redirectCreateStartTime = Date.now();
-        const redirectResponse = NextResponse.redirect(redirectUrl, { status: 307 })
-        const redirectCreateDuration = Date.now() - redirectCreateStartTime;
-        
-        console.log('🔍 [AUTH_CALLBACK] Redirect response created, copying cookies...', {
-          status: 307,
-          redirectUrl: redirectUrl.toString(),
-          redirectCreateDuration: `${redirectCreateDuration}ms`,
-          timestamp: new Date().toISOString(),
-        });
-        
-        // CRITICAL: In Next.js App Router Route Handlers, cookies set via cookies().set() 
-        // are NOT automatically included in NextResponse.redirect() responses.
-        // We MUST explicitly copy all cookies to the redirect response.
-        // This ensures the browser receives the session cookies when following the redirect.
+        // CRITICAL: Instead of using NextResponse.redirect() with cookies in headers
+        // (which causes "upstream sent too big header" 502 errors),
+        // we return an HTML page that includes cookies in the response body,
+        // then uses JavaScript to redirect. This avoids the large Set-Cookie header
+        // in redirect responses while still setting cookies server-side.
         const cookieCopyStartTime = Date.now();
         
-        console.log('🍪 [AUTH_CALLBACK] Copying cookies to redirect response:', {
-          cookiesToCopy: allCookies.length,
-          cookieNames: allCookies.map(c => c.name),
-          authCookies: allCookies.filter(c => 
-            c.name.includes('supabase') || 
-            c.name.includes('auth') || 
-            c.name === 'sb-supabase-kong-auth-token'
-          ).map(c => ({
-            name: c.name,
-            valueLength: c.value.length,
-          })),
-          timestamp: new Date().toISOString(),
-        });
-        
-        // CRITICAL: Only copy the ESSENTIAL session cookie to minimize header size
-        // Other cookies (code-verifier, etc.) are not needed for the redirect
-        // The browser will preserve existing cookies automatically
-        // This prevents "upstream sent too big header" 502 errors
-        
-        // Find the main session cookie (the one that actually contains the session)
-        // CRITICAL: Only copy the session cookie, NOT code-verifier
-        // The PKCE flow is complete after token verification, so code-verifier is no longer needed
-        // This minimizes response header size and prevents 502 errors
+        // Find the main session cookie
         const sessionCookie = allCookies.find(c => 
           c.name === 'sb-supabase-kong-auth-token' ||
           (c.name.includes('supabase') && c.name.includes('auth-token') && !c.name.includes('code-verifier'))
         );
         
-        // Only include the session cookie (skip code-verifier to minimize header size)
-        const essentialCookies = sessionCookie && sessionCookie.value && sessionCookie.value.length > 0
-          ? [sessionCookie]
-          : [];
-        
-        console.log('🍪 [AUTH_CALLBACK] Filtering cookies to copy (minimizing header size):', {
-          totalCookies: allCookies.length,
-          essentialCookiesCount: essentialCookies.length,
-          essentialCookieNames: essentialCookies.map(c => c.name),
+        console.log('🍪 [AUTH_CALLBACK] Preparing HTML redirect response:', {
+          hasSessionCookie: !!sessionCookie,
           sessionCookieName: sessionCookie?.name,
           sessionCookieLength: sessionCookie?.value?.length || 0,
-          skippedCookies: allCookies.length - essentialCookies.length,
-          skippedCookieNames: allCookies.filter(c => !essentialCookies.includes(c)).map(c => c.name),
+          redirectUrl: redirectUrl.toString(),
           timestamp: new Date().toISOString(),
         });
         
-        let cookiesCopied = 0;
-        let cookiesFailed = 0;
-        
-        essentialCookies.forEach((cookie) => {
-          try {
-            // CRITICAL: Use absolute minimal cookie options to reduce header size
-            // Only set the absolute minimum required options
-            // This is critical to prevent "upstream sent too big header" 502 errors
-            redirectResponse.cookies.set(cookie.name, cookie.value, {
-              path: '/',
-              // Use 'lax' for sameSite (required for cross-site requests)
-              sameSite: 'lax' as const,
-              // Only set httpOnly for session cookie (security requirement)
-              httpOnly: cookie.name.includes('auth-token') && !cookie.name.includes('code-verifier'),
-              // Set secure only in production
-              secure: process.env.NODE_ENV === 'production',
-              // DO NOT set: maxAge, expires, domain - these add unnecessary header size
-            });
-            cookiesCopied++;
-          } catch (error) {
-            cookiesFailed++;
-            console.error(`❌ [AUTH_CALLBACK] Failed to copy cookie ${cookie.name}:`, {
-              error: error instanceof Error ? error.message : String(error),
-              cookieName: cookie.name,
-              valueLength: cookie.value?.length || 0,
-              timestamp: new Date().toISOString(),
-            });
-          }
-        });
+        // Create HTML page that redirects via JavaScript
+        // Cookies are already set via cookies().set() in createClient() above,
+        // so they'll be automatically included in this HTML response
+        // This avoids the large Set-Cookie header in redirect response
+        const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Redirecting...</title>
+  <meta http-equiv="refresh" content="0;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
+</head>
+<body>
+  <script>
+    window.location.href = ${JSON.stringify(redirectUrl.toString())};
+  </script>
+  <p>Redirecting to <a href="${redirectUrl.toString().replace(/"/g, '&quot;')}">${redirectUrl.toString().replace(/"/g, '&quot;')}</a>...</p>
+</body>
+</html>`;
         
         const cookieCopyDuration = Date.now() - cookieCopyStartTime;
         
-        console.log('🍪 [AUTH_CALLBACK] Cookies copied to redirect response:', {
-          cookiesCopied,
-          cookiesFailed,
-          totalCookiesInResponse: redirectResponse.cookies.getAll().length,
-          cookieNames: redirectResponse.cookies.getAll().map(c => c.name),
-          duration: `${cookieCopyDuration}ms`,
-          timestamp: new Date().toISOString(),
+        // Create response with HTML content
+        // Cookies are already set via cookies().set() in createClient() above,
+        // so they'll be automatically included in this response
+        const htmlResponse = new NextResponse(html, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+            'Pragma': 'no-cache',
+          },
         });
         
-        // Set minimal headers to prevent caching issues
-        // Keep headers minimal to reduce response header size
-        redirectResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
-        redirectResponse.headers.set('Pragma', 'no-cache');
-        
-        // Ensure redirect URL is absolute and valid
-        if (!redirectUrl.toString().startsWith('http')) {
-          console.error('❌ [AUTH_CALLBACK] Invalid redirect URL:', redirectUrl.toString());
-          const fallbackUrl = new URL('/dashboard', baseUrl);
-          return NextResponse.redirect(fallbackUrl, { status: 307 });
-        }
+        // Cookies are already set via cookies().set() in createClient() above
+        // They will be automatically included in this HTML response
+        // This avoids the large Set-Cookie header in redirect response
         
         const totalDuration = Date.now() - requestStartTime;
         
-        console.log('✅ [AUTH_CALLBACK] Token verified successfully, redirecting:', {
+        console.log('✅ [AUTH_CALLBACK] Token verified successfully, returning HTML redirect:', {
           redirectUrl: redirectUrl.toString(),
           cookiesCount: allCookies.length,
           cookieNames: allCookies.map(c => c.name).filter(name => name.includes('supabase') || name.includes('auth')),
-          cookiesInResponse: redirectResponse.cookies.getAll().map(c => c.name).filter(name => name.includes('supabase') || name.includes('auth')),
-          responseHeaders: Object.fromEntries(redirectResponse.headers.entries()),
+          hasSessionCookie: !!sessionCookie,
           durations: {
             sessionGet: `${sessionGetDuration}ms`,
             cookieGet: `${cookieGetDuration}ms`,
-            redirectCreate: `${redirectCreateDuration}ms`,
             cookieCopy: `${cookieCopyDuration}ms`,
             total: `${totalDuration}ms`,
           },
           timestamp: new Date().toISOString(),
         });
         
-        return redirectResponse
+        return htmlResponse
       } else {
         // Token verification succeeded but no user data returned
         console.error('⚠️ Token verification succeeded but no user data:', {
