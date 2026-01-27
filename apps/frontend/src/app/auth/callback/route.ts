@@ -577,15 +577,18 @@ export async function GET(request: NextRequest) {
         
         essentialCookies.forEach((cookie) => {
           try {
-            // Minimize cookie options to reduce header size
-            // Use minimal options - path and sameSite are most important
+            // CRITICAL: Use absolute minimal cookie options to reduce header size
+            // Only set the absolute minimum required options
+            // This is critical to prevent "upstream sent too big header" 502 errors
             redirectResponse.cookies.set(cookie.name, cookie.value, {
               path: '/',
+              // Use 'lax' for sameSite (required for cross-site requests)
               sameSite: 'lax' as const,
-              // Only set httpOnly for session cookie, not code-verifier
+              // Only set httpOnly for session cookie (security requirement)
               httpOnly: cookie.name.includes('auth-token') && !cookie.name.includes('code-verifier'),
+              // Set secure only in production
               secure: process.env.NODE_ENV === 'production',
-              // Don't set maxAge, expires, or domain - keep it minimal
+              // DO NOT set: maxAge, expires, domain - these add unnecessary header size
             });
             cookiesCopied++;
           } catch (error) {
@@ -610,11 +613,10 @@ export async function GET(request: NextRequest) {
           timestamp: new Date().toISOString(),
         });
         
-        // Set additional headers to prevent caching issues and ensure proper redirect handling
-        redirectResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        // Set minimal headers to prevent caching issues
+        // Keep headers minimal to reduce response header size
+        redirectResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
         redirectResponse.headers.set('Pragma', 'no-cache');
-        redirectResponse.headers.set('Expires', '0');
-        redirectResponse.headers.set('X-Robots-Tag', 'noindex, nofollow');
         
         // Ensure redirect URL is absolute and valid
         if (!redirectUrl.toString().startsWith('http')) {
