@@ -127,10 +127,23 @@ export async function middleware(request: NextRequest) {
       if (hasAuthCookie) {
         // User is already authenticated, ignore token params and continue
         // Remove token params from URL to prevent future redirects
-        const cleanUrl = new URL(request.url);
-        const hadTokenParams = cleanUrl.searchParams.has('token') || 
-                              cleanUrl.searchParams.has('code') || 
-                              cleanUrl.searchParams.has('type');
+        // Use the same baseUrl calculation as redirect logic to ensure public URL
+        const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('X-Forwarded-Host');
+        const forwardedProto = request.headers.get('x-forwarded-proto') || request.headers.get('X-Forwarded-Proto') || 'https';
+        const host = request.headers.get('host') || request.headers.get('Host');
+        
+        let baseUrl: string;
+        if (forwardedHost) {
+          const protocol = forwardedProto || 'https';
+          baseUrl = `${protocol}://${forwardedHost}`;
+        } else if (host && !host.includes('0.0.0.0') && !host.includes('127.0.0.1')) {
+          const protocol = forwardedProto || 'https';
+          baseUrl = `${protocol}://${host}`;
+        } else {
+          baseUrl = request.nextUrl.origin;
+        }
+        
+        const hadTokenParams = !!token || !!code || !!type;
         
         console.log('🔍 [Middleware] Authenticated user with auth params:', {
           from: pathname,
@@ -141,17 +154,28 @@ export async function middleware(request: NextRequest) {
           hadError: !!error,
           hadTokenParams,
           currentUrl: request.url,
+          forwardedHost,
+          forwardedProto,
+          host,
+          calculatedBaseUrl: baseUrl,
           timestamp: new Date().toISOString(),
         });
         
         if (hadTokenParams) {
-          cleanUrl.searchParams.delete('token');
-          cleanUrl.searchParams.delete('type');
-          cleanUrl.searchParams.delete('code');
-          if (!error) {
-            // Only remove error param if it's not an actual error
-            cleanUrl.searchParams.delete('error');
-          }
+          // Build clean URL using public baseUrl, not internal request.url
+          const cleanUrl = new URL(pathname || '/', baseUrl);
+          
+          // Preserve non-auth query parameters (like redirect_to, returnUrl, email, etc.)
+          const searchParams = request.nextUrl.searchParams;
+          searchParams.forEach((value, key) => {
+            // Only keep non-auth parameters
+            if (key !== 'token' && key !== 'type' && key !== 'code') {
+              if (key !== 'error' || error) {
+                // Keep error param only if it's an actual error
+                cleanUrl.searchParams.set(key, value);
+              }
+            }
+          });
           
           console.log('🔄 [Middleware] User already authenticated, cleaning token params from URL:', {
             from: pathname,
@@ -160,6 +184,7 @@ export async function middleware(request: NextRequest) {
             hadType: !!type,
             originalUrl: request.url,
             cleanedUrl: cleanUrl.toString(),
+            baseUrl,
             timestamp: new Date().toISOString(),
           });
           
