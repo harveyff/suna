@@ -13,6 +13,7 @@ import type { NextRequest } from 'next/server'
  */
 
 export async function GET(request: NextRequest) {
+  const requestStartTime = Date.now();
   const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
   const token = searchParams.get('token') // Supabase verification token
@@ -28,6 +29,22 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get('error')
   const errorCode = searchParams.get('error_code')
   const errorDescription = searchParams.get('error_description')
+
+  // Log request details for debugging
+  console.log('🔍 [AUTH_CALLBACK] Route handler started:', {
+    url: request.url,
+    pathname: request.nextUrl.pathname,
+    searchParams: Object.fromEntries(searchParams),
+    method: request.method,
+    hasCode: !!code,
+    hasToken: !!token,
+    hasType: !!type,
+    tokenPreview: token ? token.substring(0, 20) + '...' : null,
+    type,
+    email,
+    returnUrl: next,
+    timestamp: new Date().toISOString(),
+  });
 
 
   // Handle errors FIRST - before any Supabase operations that might affect session
@@ -61,16 +78,84 @@ export async function GET(request: NextRequest) {
 
   const supabase = await createClient()
 
-  // Handle token-based verification (email confirmation, etc.)
-  // Supabase sends these to the redirect URL for processing
+  // Handle token-based verification (PKCE magic links, email confirmation, etc.)
+  // PKCE tokens start with "pkce_" and should be treated as codes for exchangeCodeForSession
   if (token && type) {
-    // For token-based flows, redirect to auth page that can handle the verification client-side
-    const verifyUrl = new URL(`${baseUrl}/auth`)
-    verifyUrl.searchParams.set('token', token)
-    verifyUrl.searchParams.set('type', type)
-    if (termsAccepted) verifyUrl.searchParams.set('terms_accepted', 'true')
-    
-    return NextResponse.redirect(verifyUrl)
+    console.log('🔍 [AUTH_CALLBACK] Processing token-based verification:', {
+      tokenPreview: token.substring(0, 20) + '...',
+      type,
+      isPkceToken: token.startsWith('pkce_'),
+      email,
+      returnUrl: next,
+      timestamp: new Date().toISOString(),
+    });
+
+    // PKCE tokens (magic links) should be treated as codes
+    if (token.startsWith('pkce_')) {
+      try {
+        console.log('🔍 [AUTH_CALLBACK] Treating PKCE token as code for exchangeCodeForSession');
+        const { data, error } = await supabase.auth.exchangeCodeForSession(token);
+        
+        if (error) {
+          console.error('❌ [AUTH_CALLBACK] Error exchanging PKCE token for session:', {
+            error: error.message,
+            errorCode: error.code,
+            errorStatus: error.status,
+            timestamp: new Date().toISOString(),
+          });
+          
+          // Check if expired/invalid
+          const isExpired = 
+            error.message?.toLowerCase().includes('expired') ||
+            error.message?.toLowerCase().includes('invalid') ||
+            error.status === 400 ||
+            error.code === 'expired_token' ||
+            error.code === 'token_expired' ||
+            error.code === 'otp_expired';
+          
+          if (isExpired) {
+            const expiredUrl = new URL(`${baseUrl}/auth`, request.url);
+            expiredUrl.searchParams.set('expired', 'true');
+            if (email) expiredUrl.searchParams.set('email', email);
+            if (next) expiredUrl.searchParams.set('returnUrl', next);
+            console.log('🔄 [AUTH_CALLBACK] Redirecting to auth page with expired state');
+            return NextResponse.redirect(expiredUrl);
+          }
+          
+          return NextResponse.redirect(`${baseUrl}/auth?error=${encodeURIComponent(error.message)}`);
+        }
+
+        // Success - redirect to dashboard
+        if (data?.user) {
+          const redirectUrl = new URL(`${baseUrl}${next}`, request.url);
+          redirectUrl.searchParams.set('auth_event', 'login');
+          redirectUrl.searchParams.set('auth_method', 'email');
+          console.log('✅ [AUTH_CALLBACK] PKCE token verified successfully, redirecting:', {
+            redirectUrl: redirectUrl.toString(),
+            userId: data.user.id,
+            timestamp: new Date().toISOString(),
+          });
+          return NextResponse.redirect(redirectUrl);
+        }
+      } catch (err) {
+        console.error('❌ [AUTH_CALLBACK] Exception processing PKCE token:', err);
+        return NextResponse.redirect(`${baseUrl}/auth?error=unexpected_error`);
+      }
+    } else {
+      // For non-PKCE tokens, redirect to auth page for client-side handling
+      const verifyUrl = new URL(`${baseUrl}/auth`, request.url);
+      verifyUrl.searchParams.set('token', token);
+      verifyUrl.searchParams.set('type', type);
+      if (termsAccepted) verifyUrl.searchParams.set('terms_accepted', 'true');
+      if (email) verifyUrl.searchParams.set('email', email);
+      if (next) verifyUrl.searchParams.set('returnUrl', next);
+      
+      console.log('🔄 [AUTH_CALLBACK] Redirecting non-PKCE token to auth page:', {
+        verifyUrl: verifyUrl.toString(),
+        timestamp: new Date().toISOString(),
+      });
+      return NextResponse.redirect(verifyUrl);
+    }
   }
 
   // Handle code exchange (OAuth, magic link)

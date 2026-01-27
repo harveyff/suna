@@ -105,10 +105,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Handle Supabase verification redirects at root level
-  // Supabase sometimes redirects to root (/) instead of /auth/callback
+  // Handle Supabase verification redirects at root level and /auth page
+  // Supabase sometimes redirects to root (/) or /auth instead of /auth/callback
   // Detect authentication parameters and redirect to proper callback handler
-  if (pathname === '/' || pathname === '') {
+  if (pathname === '/' || pathname === '' || pathname === '/auth') {
     const searchParams = request.nextUrl.searchParams;
     const code = searchParams.get('code');
     const token = searchParams.get('token');
@@ -125,7 +125,15 @@ export async function middleware(request: NextRequest) {
         callbackUrl.searchParams.set(key, value);
       });
       
-      console.log('🔄 Redirecting Supabase verification from root to /auth/callback');
+      console.log('🔄 [Middleware] Redirecting Supabase verification to /auth/callback:', {
+        from: pathname,
+        hasCode: !!code,
+        hasToken: !!token,
+        hasType: !!type,
+        hasError: !!error,
+        callbackUrl: callbackUrl.toString(),
+        timestamp: new Date().toISOString(),
+      });
       return NextResponse.redirect(callbackUrl);
     }
   }
