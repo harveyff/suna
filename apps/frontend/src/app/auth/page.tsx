@@ -80,7 +80,8 @@ function LoginContent() {
   useEffect(() => {
     // Redirect to dashboard if user is logged in
     if (!isLoading && user) {
-      const finalReturnUrl = returnUrl || '/dashboard';
+      // Ensure returnUrl is an absolute path (starts with /)
+      const finalReturnUrl = returnUrl ? (returnUrl.startsWith('/') ? returnUrl : `/${returnUrl}`) : '/dashboard';
       console.log('🔄 [Auth Page] User already authenticated, redirecting:', {
         userId: user.id,
         email: user.email,

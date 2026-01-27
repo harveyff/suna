@@ -162,82 +162,46 @@ export async function middleware(request: NextRequest) {
         });
         
         if (hadTokenParams) {
-          // Extract returnUrl from redirect_to if it exists
-          const searchParams = request.nextUrl.searchParams;
-          const redirectTo = searchParams.get('redirect_to');
-          let finalReturnUrl = searchParams.get('returnUrl') || searchParams.get('redirect') || '/dashboard';
-          
-          // If redirect_to points to /auth/callback, extract returnUrl from it
-          if (redirectTo) {
-            try {
-              const redirectToUrl = new URL(redirectTo);
-              const returnUrlFromRedirectTo = redirectToUrl.searchParams.get('returnUrl');
-              if (returnUrlFromRedirectTo && redirectToUrl.pathname.includes('/auth/callback')) {
-                finalReturnUrl = returnUrlFromRedirectTo;
-                console.log('✅ [Middleware] Extracted returnUrl from redirect_to:', {
-                  redirectTo,
-                  extractedReturnUrl: finalReturnUrl,
-                  timestamp: new Date().toISOString(),
-                });
-              }
-            } catch (e) {
-              // Ignore parsing errors
-            }
-          }
-          
-          // If user is on /auth page and already authenticated, redirect directly to dashboard
-          // This avoids the delay of AuthProvider initialization on /auth page
-          if (pathname === '/auth') {
-            const dashboardUrl = new URL(finalReturnUrl, baseUrl);
-            console.log('🚀 [Middleware] Authenticated user on /auth, redirecting directly to dashboard:', {
-              from: pathname,
-              returnUrl: finalReturnUrl,
-              redirectTo: dashboardUrl.toString(),
-              timestamp: new Date().toISOString(),
-            });
-            return NextResponse.redirect(dashboardUrl);
-          }
-          
-          // For other pages, clean token params but keep the page
-          const cleanUrl = new URL(pathname || '/', baseUrl);
-          
-          // Preserve non-auth query parameters
+          // User has token params - let /auth/callback handle them first
+          // This allows token validation and OTP input page display if token is invalid/expired
+          // Only redirect to dashboard AFTER token is processed (if valid)
+          const callbackUrl = new URL('/auth/callback', baseUrl);
           searchParams.forEach((value, key) => {
-            if (key !== 'token' && key !== 'type' && key !== 'code') {
-              if (key !== 'error' || error) {
-                // Skip redirect_to if we already extracted returnUrl
-                if (key !== 'redirect_to' || !redirectTo) {
-                  cleanUrl.searchParams.set(key, value);
-                }
-              }
-            }
+            callbackUrl.searchParams.set(key, value);
           });
           
-          // Set returnUrl if we extracted it
-          if (finalReturnUrl !== '/dashboard') {
-            cleanUrl.searchParams.set('returnUrl', finalReturnUrl);
-          }
-          
-          console.log('🔄 [Middleware] User already authenticated, cleaning token params from URL:', {
+          console.log('🔄 [Middleware] Authenticated user with token params, redirecting to /auth/callback for processing:', {
             from: pathname,
             hadToken: !!token,
             hadCode: !!code,
             hadType: !!type,
-            originalUrl: request.url,
-            cleanedUrl: cleanUrl.toString(),
-            baseUrl,
+            callbackUrl: callbackUrl.toString(),
             timestamp: new Date().toISOString(),
           });
           
-          return NextResponse.redirect(cleanUrl);
+          return NextResponse.redirect(callbackUrl);
+        }
+        
+        // No token params - user is authenticated and visiting /auth without token
+        // Redirect to dashboard to avoid showing login page
+        if (pathname === '/auth') {
+          const returnUrl = searchParams.get('returnUrl') || searchParams.get('redirect') || '/dashboard';
+          const returnPath = returnUrl.startsWith('/') ? returnUrl : `/${returnUrl}`;
+          const dashboardUrl = new URL(returnPath, baseUrl);
+          
+          console.log('🚀 [Middleware] Authenticated user visiting /auth (no token), redirecting to dashboard:', {
+            from: pathname,
+            returnUrl,
+            redirectTo: dashboardUrl.toString(),
+            timestamp: new Date().toISOString(),
+          });
+          
+          return NextResponse.redirect(dashboardUrl);
         }
         
         // No token params to clean, just continue
-        console.log('✅ [Middleware] User already authenticated, ignoring auth params (no cleanup needed):', {
+        console.log('✅ [Middleware] User already authenticated, no token params, continuing:', {
           from: pathname,
-          hasToken: !!token,
-          hasCode: !!code,
-          hasType: !!type,
           timestamp: new Date().toISOString(),
         });
       }
