@@ -238,20 +238,33 @@ export async function GET(request: NextRequest) {
         redirectUrl.searchParams.set('auth_method', authMethod)
         
         // Create redirect response
-        // The cookies should already be set by createServerClient's setAll method via cookieStore.set()
-        // In Next.js App Router, cookies set via cookies().set() are automatically included in responses
-        const redirectResponse = NextResponse.redirect(redirectUrl)
-        
-        // Explicitly ensure cookies are included by reading from cookie store
-        // This is a safety measure to ensure cookies are in the redirect response
+        // IMPORTANT: In Next.js, cookies set via cookies().set() are NOT automatically included
+        // in NextResponse.redirect(). We must explicitly copy cookies to the redirect response.
         const { cookies } = await import('next/headers');
         const cookieStore = await cookies();
         const allCookies = cookieStore.getAll();
+        
+        const redirectResponse = NextResponse.redirect(redirectUrl)
+        
+        // Explicitly copy all cookies to the redirect response
+        // This ensures cookies are available when the browser follows the redirect
+        allCookies.forEach((cookie) => {
+          redirectResponse.cookies.set(cookie.name, cookie.value, {
+            path: cookie.path || '/',
+            domain: cookie.domain,
+            maxAge: cookie.maxAge,
+            expires: cookie.expires,
+            httpOnly: cookie.httpOnly,
+            secure: cookie.secure,
+            sameSite: cookie.sameSite as 'strict' | 'lax' | 'none' | undefined,
+          });
+        });
         
         // Log cookie information for debugging
         console.log('✅ Token verified successfully, redirecting to:', redirectUrl.toString(), {
           cookiesCount: allCookies.length,
           cookieNames: allCookies.map(c => c.name).filter(name => name.includes('supabase') || name.includes('auth')),
+          cookiesSet: redirectResponse.cookies.getAll().map(c => c.name).filter(name => name.includes('supabase') || name.includes('auth')),
         });
         
         return redirectResponse
