@@ -161,78 +161,52 @@ export default function DashboardLayoutContent({
       timestamp: new Date().toISOString(),
     });
 
-    if (!isLoading && !user) {
-      // Check if auth cookies exist - if they do, wait a bit for AuthProvider to read them
-      const hasAuthCookie = typeof document !== 'undefined' && (
-        document.cookie.includes('sb-supabase-kong-auth-token') ||
-        document.cookie.includes('sb-2f5c36de-auth-token') ||
-        document.cookie.includes('sb-demo-auth-token')
-      );
-      
-      console.log('⚠️ [Dashboard] User not authenticated, checking cookies:', {
-        hasAuthCookie,
-        cookieString: typeof document !== 'undefined' ? document.cookie.substring(0, 200) : 'N/A',
+    // Don't redirect while loading - AuthProvider is still initializing
+    if (isLoading) {
+      console.log('⏳ [Dashboard] AuthProvider still loading, waiting...', {
         timestamp: new Date().toISOString(),
       });
-      
-      if (hasAuthCookie) {
-        // Auth cookies exist but user is null - AuthProvider might still be initializing
-        // Wait a bit before redirecting to give AuthProvider time to read the session
-        console.log('⏳ [Dashboard] Auth cookies found but user is null, waiting for AuthProvider...', {
-          waitTime: '500ms',
-          timestamp: new Date().toISOString(),
-        });
-        
-        const timeoutId = setTimeout(() => {
-          // After delay, check if cookie still exists
-          // If cookie exists but user is still null, AuthProvider might be having issues
-          // But we'll give it more time by not redirecting immediately
-          // The effect will re-run when user changes, preventing unnecessary redirects
-          console.log('🔍 [Dashboard] Delay completed, checking cookie state...', {
-            timestamp: new Date().toISOString(),
-          });
-          
-          // Check current cookie state
-          const stillHasCookie = typeof document !== 'undefined' && (
-            document.cookie.includes('sb-supabase-kong-auth-token') ||
-            document.cookie.includes('sb-2f5c36de-auth-token') ||
-            document.cookie.includes('sb-demo-auth-token')
-          );
-          
-          if (!stillHasCookie) {
-            // Cookie is gone, definitely not authenticated
-            console.log('❌ [Dashboard] Cookie gone after delay, redirecting to /auth', {
-              timestamp: new Date().toISOString(),
-            });
-            router.push('/auth');
-          } else {
-            // Cookie still exists - AuthProvider might still be initializing
-            // Don't redirect - let the effect re-run when user state changes
-            console.log('⏳ [Dashboard] Cookie still exists, AuthProvider may still be initializing', {
-              timestamp: new Date().toISOString(),
-            });
-          }
-        }, 2000); // Increased to 2000ms to allow more time for session initialization after OTP verification
-        
-        return () => {
-          console.log('🧹 [Dashboard] Cleaning up auth check timeout', {
-            timestamp: new Date().toISOString(),
-          });
-          clearTimeout(timeoutId);
-        };
-      } else {
-        // No auth cookies, user is definitely not authenticated
-        console.log('❌ [Dashboard] No auth cookies found, redirecting to /auth', {
-          timestamp: new Date().toISOString(),
-        });
-        router.push('/auth');
-      }
-    } else if (user) {
+      return;
+    }
+
+    // User is authenticated, no need to redirect
+    if (user) {
       console.log('✅ [Dashboard] User authenticated, staying on dashboard', {
         userId: user.id,
         email: user.email,
         timestamp: new Date().toISOString(),
       });
+      return;
+    }
+
+    // User is not authenticated - check cookies
+    const hasAuthCookie = typeof document !== 'undefined' && (
+      document.cookie.includes('sb-supabase-kong-auth-token') ||
+      document.cookie.includes('sb-2f5c36de-auth-token') ||
+      document.cookie.includes('sb-demo-auth-token')
+    );
+    
+    console.log('⚠️ [Dashboard] User not authenticated, checking cookies:', {
+      hasAuthCookie,
+      cookieString: typeof document !== 'undefined' ? document.cookie.substring(0, 200) : 'N/A',
+      timestamp: new Date().toISOString(),
+    });
+    
+    if (hasAuthCookie) {
+      // Auth cookies exist but user is null - AuthProvider might still be initializing
+      // Don't redirect immediately - this prevents redirect loops when middleware redirects authenticated users
+      // The effect will re-run when user changes, and if user is still null after a delay, we'll check again
+      console.log('⏳ [Dashboard] Auth cookies found but user is null - AuthProvider may still be initializing, not redirecting', {
+        timestamp: new Date().toISOString(),
+      });
+      // Don't redirect - let AuthProvider initialize
+      return;
+    } else {
+      // No auth cookies, user is definitely not authenticated
+      console.log('❌ [Dashboard] No auth cookies found, redirecting to /auth', {
+        timestamp: new Date().toISOString(),
+      });
+      router.push('/auth');
     }
   }, [user, isLoading, router]);
 

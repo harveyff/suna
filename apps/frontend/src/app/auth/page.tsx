@@ -77,22 +77,22 @@ function LoginContent() {
 
   const { wasLastMethod: wasEmailLastMethod, markAsUsed: markEmailAsUsed } = useAuthMethodTracking('email');
 
+  // Note: We don't redirect authenticated users here because middleware handles it server-side
+  // Client-side redirect here can cause redirect loops when middleware already redirected
+  // If user reaches this page, they should see the auth form (middleware will redirect if authenticated)
   useEffect(() => {
-    // Redirect to dashboard if user is logged in
+    // Only log, don't redirect - middleware handles authenticated user redirects
     if (!isLoading && user) {
-      // Ensure returnUrl is an absolute path (starts with /)
-      const finalReturnUrl = returnUrl ? (returnUrl.startsWith('/') ? returnUrl : `/${returnUrl}`) : '/dashboard';
-      console.log('🔄 [Auth Page] User already authenticated, redirecting:', {
+      console.log('⚠️ [Auth Page] User authenticated but reached auth page - middleware should have redirected:', {
         userId: user.id,
         email: user.email,
         returnUrl,
-        finalReturnUrl,
         currentPath: typeof window !== 'undefined' ? window.location.pathname : 'unknown',
         timestamp: new Date().toISOString(),
       });
-      router.replace(finalReturnUrl);
+      // Don't redirect here - let middleware handle it to avoid loops
     }
-  }, [user, isLoading, router, returnUrl]);
+  }, [user, isLoading, returnUrl]);
 
   const isSuccessMessage =
     message &&
