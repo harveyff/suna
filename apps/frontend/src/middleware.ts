@@ -261,16 +261,46 @@ export async function middleware(request: NextRequest) {
   
   const sessionCookie = authCookies.find(c => c.name === 'sb-supabase-kong-auth-token');
   
+  // Log request headers for debugging
+  const requestHeaders = Object.fromEntries(request.headers.entries());
+  const cookieHeader = request.headers.get('cookie');
+  
   console.log('🔍 [Middleware] Auth check:', {
     pathname,
+    url: request.url,
+    origin: request.nextUrl.origin,
+    protocol: request.nextUrl.protocol,
+    hostname: request.nextUrl.hostname,
     totalCookies: allCookies.length,
+    allCookieNames: allCookies.map(c => c.name),
+    allCookieDetails: allCookies.map(c => ({
+      name: c.name,
+      valueLength: c.value.length,
+      valuePreview: c.value.substring(0, 30) + '...',
+    })),
     authCookiesCount: authCookies.length,
     authCookieNames: authCookies.map(c => c.name),
+    authCookieDetails: authCookies.map(c => ({
+      name: c.name,
+      valueLength: c.value.length,
+      valuePreview: c.value.substring(0, 50) + '...',
+      startsWithBase64: c.value.startsWith('base64-'),
+    })),
     hasSessionCookie: !!sessionCookie,
     sessionCookieName: sessionCookie?.name,
     sessionCookieValueLength: sessionCookie?.value?.length || 0,
     sessionCookieValuePreview: sessionCookie?.value?.substring(0, 50) + '...',
     sessionCookieStartsWithBase64: sessionCookie?.value?.startsWith('base64-') || false,
+    cookieHeaderLength: cookieHeader?.length || 0,
+    cookieHeaderPreview: cookieHeader?.substring(0, 200) + '...',
+    cookieHeaderCount: cookieHeader ? cookieHeader.split(';').length : 0,
+    requestHeaders: {
+      host: requestHeaders.host,
+      'x-forwarded-host': requestHeaders['x-forwarded-host'],
+      'x-forwarded-proto': requestHeaders['x-forwarded-proto'],
+      'x-forwarded-for': requestHeaders['x-forwarded-for'],
+      'user-agent': requestHeaders['user-agent']?.substring(0, 50) + '...',
+    },
     supabaseUrl,
     timestamp: new Date().toISOString(),
   });

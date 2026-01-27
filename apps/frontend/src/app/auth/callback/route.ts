@@ -203,14 +203,35 @@ export async function GET(request: NextRequest) {
 <head>
   <meta charset="utf-8">
   <title>Redirecting...</title>
-  <meta http-equiv="refresh" content="1;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
+  <meta http-equiv="refresh" content="3;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
 </head>
 <body>
   <script>
-    // Small delay to ensure cookies are processed before redirect
+    // CRITICAL: Wait longer to ensure cookies are fully processed before redirect
+    // Cookies set via Set-Cookie header need time to be stored by the browser
+    // Note: httpOnly cookies cannot be checked via document.cookie, so we just wait
+    // Using window.location.replace() instead of href to avoid history issues
+    // Using a longer delay (1000ms) to ensure browser has fully processed the Set-Cookie header
+    console.log('🔍 [AUTH_CALLBACK] HTML redirect script started:', {
+      redirectUrl: ${JSON.stringify(redirectUrl.toString())},
+      currentUrl: window.location.href,
+      currentOrigin: window.location.origin,
+      currentPathname: window.location.pathname,
+      cookieCount: document.cookie ? document.cookie.split(';').length : 0,
+      cookieNames: document.cookie ? document.cookie.split(';').map(c => c.split('=')[0].trim()) : [],
+      timestamp: new Date().toISOString(),
+    });
+    
     setTimeout(function() {
-      window.location.href = ${JSON.stringify(redirectUrl.toString())};
-    }, 100);
+      console.log('🔍 [AUTH_CALLBACK] Executing redirect:', {
+        redirectUrl: ${JSON.stringify(redirectUrl.toString())},
+        currentUrl: window.location.href,
+        cookieCount: document.cookie ? document.cookie.split(';').length : 0,
+        cookieNames: document.cookie ? document.cookie.split(';').map(c => c.split('=')[0].trim()) : [],
+        timestamp: new Date().toISOString(),
+      });
+      window.location.replace(${JSON.stringify(redirectUrl.toString())});
+    }, 1000);
   </script>
   <p>Redirecting to <a href="${redirectUrl.toString().replace(/"/g, '&quot;')}">${redirectUrl.toString().replace(/"/g, '&quot;')}</a>...</p>
 </body>
@@ -219,6 +240,16 @@ export async function GET(request: NextRequest) {
     console.log('🔍 [AUTH_CALLBACK] Creating HTML redirect response for existing session:', {
       htmlLength: html.length,
       redirectUrl: redirectUrl.toString(),
+      redirectUrlHostname: redirectUrl.hostname,
+      redirectUrlPathname: redirectUrl.pathname,
+      redirectUrlProtocol: redirectUrl.protocol,
+      baseUrl,
+      next,
+      allCookiesCount: allCookies.length,
+      allCookieNames: allCookies.map(c => c.name),
+      sessionCookieExists: !!sessionCookieForResponse,
+      sessionCookieName: sessionCookieForResponse?.name,
+      sessionCookieLength: sessionCookieForResponse?.value?.length || 0,
       timestamp: new Date().toISOString(),
     });
     
@@ -251,11 +282,16 @@ export async function GET(request: NextRequest) {
     if (sessionCookieForResponse && sessionCookieForResponse.value && sessionCookieForResponse.value.length > 0) {
       try {
         // CRITICAL: Always use secure=true for HTTPS, and ensure cookie options match Supabase expectations
+        // IMPORTANT: Do NOT set domain - let browser use default (current domain)
+        // IMPORTANT: Do NOT set maxAge - let Supabase manage expiration via session.expires_at
+        // Setting domain or maxAge incorrectly can prevent cookie from being sent
         htmlResponse.cookies.set(sessionCookieForResponse.name, sessionCookieForResponse.value, {
           path: '/',
           sameSite: 'lax' as const,
           httpOnly: true,
           secure: true, // Always secure for HTTPS
+          // Do NOT set domain - browser will use current domain
+          // Do NOT set maxAge - Supabase manages expiration
         });
         console.log('✅ [AUTH_CALLBACK] Session cookie copied to HTML response:', {
           cookieName: sessionCookieForResponse.name,
@@ -294,10 +330,31 @@ export async function GET(request: NextRequest) {
     
     // Log response headers to verify Set-Cookie header is present
     const responseHeaders = Object.fromEntries(htmlResponse.headers.entries());
+    const setCookieHeader = htmlResponse.headers.get('set-cookie') || htmlResponse.headers.get('Set-Cookie');
+    const allSetCookieHeaders = htmlResponse.headers.getAll('set-cookie') || htmlResponse.headers.getAll('Set-Cookie') || [];
     console.log('🔍 [AUTH_CALLBACK] Response headers (existing session):', {
-      headers: responseHeaders,
-      hasSetCookie: htmlResponse.headers.get('set-cookie') !== null,
-      setCookieValue: htmlResponse.headers.get('set-cookie')?.substring(0, 100) + '...',
+      headerCount: Object.keys(responseHeaders).length,
+      allHeaderKeys: Object.keys(responseHeaders),
+      hasSetCookie: setCookieHeader !== null,
+      setCookieHeaderCount: allSetCookieHeaders.length,
+      setCookieHeaders: allSetCookieHeaders.map((h, i) => ({
+        index: i,
+        length: h.length,
+        preview: h.substring(0, 150) + '...',
+        fullHeader: h,
+      })),
+      setCookieValue: setCookieHeader?.substring(0, 200) + '...',
+      setCookieFullLength: setCookieHeader?.length || 0,
+      responseCookiesCount: responseCookies.length,
+      responseCookiesDetails: responseCookies.map(c => ({
+        name: c.name,
+        valueLength: c.value.length,
+        valuePreview: c.value.substring(0, 50) + '...',
+        hasPath: c.name.includes('path') || c.value.includes('Path='),
+        hasSecure: c.name.includes('secure') || c.value.includes('Secure'),
+        hasHttpOnly: c.name.includes('httpOnly') || c.value.includes('HttpOnly'),
+        hasSameSite: c.name.includes('sameSite') || c.value.includes('SameSite'),
+      })),
       timestamp: new Date().toISOString(),
     });
     
@@ -491,14 +548,35 @@ export async function GET(request: NextRequest) {
 <head>
   <meta charset="utf-8">
   <title>Redirecting...</title>
-  <meta http-equiv="refresh" content="1;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
+  <meta http-equiv="refresh" content="3;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
 </head>
 <body>
   <script>
-    // Small delay to ensure cookies are processed before redirect
+    // CRITICAL: Wait longer to ensure cookies are fully processed before redirect
+    // Cookies set via Set-Cookie header need time to be stored by the browser
+    // Note: httpOnly cookies cannot be checked via document.cookie, so we just wait
+    // Using window.location.replace() instead of href to avoid history issues
+    // Using a longer delay (1000ms) to ensure browser has fully processed the Set-Cookie header
+    console.log('🔍 [AUTH_CALLBACK] HTML redirect script started:', {
+      redirectUrl: ${JSON.stringify(redirectUrl.toString())},
+      currentUrl: window.location.href,
+      currentOrigin: window.location.origin,
+      currentPathname: window.location.pathname,
+      cookieCount: document.cookie ? document.cookie.split(';').length : 0,
+      cookieNames: document.cookie ? document.cookie.split(';').map(c => c.split('=')[0].trim()) : [],
+      timestamp: new Date().toISOString(),
+    });
+    
     setTimeout(function() {
-      window.location.href = ${JSON.stringify(redirectUrl.toString())};
-    }, 100);
+      console.log('🔍 [AUTH_CALLBACK] Executing redirect:', {
+        redirectUrl: ${JSON.stringify(redirectUrl.toString())},
+        currentUrl: window.location.href,
+        cookieCount: document.cookie ? document.cookie.split(';').length : 0,
+        cookieNames: document.cookie ? document.cookie.split(';').map(c => c.split('=')[0].trim()) : [],
+        timestamp: new Date().toISOString(),
+      });
+      window.location.replace(${JSON.stringify(redirectUrl.toString())});
+    }, 1000);
   </script>
   <p>Redirecting to <a href="${redirectUrl.toString().replace(/"/g, '&quot;')}">${redirectUrl.toString().replace(/"/g, '&quot;')}</a>...</p>
 </body>
@@ -543,16 +621,24 @@ export async function GET(request: NextRequest) {
             if (expiredSessionCookie && expiredSessionCookie.value && expiredSessionCookie.value.length > 0) {
               try {
                 // CRITICAL: Always use secure=true for HTTPS, and ensure cookie options match Supabase expectations
+                // IMPORTANT: Do NOT set domain - let browser use default (current domain)
+                // IMPORTANT: Do NOT set maxAge - let Supabase manage expiration via session.expires_at
+                // Setting domain or maxAge incorrectly can prevent cookie from being sent
                 htmlResponse.cookies.set(expiredSessionCookie.name, expiredSessionCookie.value, {
                   path: '/',
                   sameSite: 'lax' as const,
                   httpOnly: true,
                   secure: true, // Always secure for HTTPS
+                  // Do NOT set domain - browser will use current domain
+                  // Do NOT set maxAge - Supabase manages expiration
                 });
+                const cookieOptions = { path: '/', sameSite: 'lax' as const, httpOnly: true, secure: true };
                 console.log('✅ [AUTH_CALLBACK] Session cookie copied to HTML response:', {
                   cookieName: expiredSessionCookie.name,
                   cookieLength: expiredSessionCookie.value.length,
-                  options: { path: '/', sameSite: 'lax', httpOnly: true, secure: true },
+                  cookieValuePreview: expiredSessionCookie.value.substring(0, 50) + '...',
+                  options: cookieOptions,
+                  optionsString: JSON.stringify(cookieOptions),
                   timestamp: new Date().toISOString(),
                 });
               } catch (error) {
@@ -765,14 +851,35 @@ export async function GET(request: NextRequest) {
 <head>
   <meta charset="utf-8">
   <title>Redirecting...</title>
-  <meta http-equiv="refresh" content="1;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
+  <meta http-equiv="refresh" content="3;url=${redirectUrl.toString().replace(/"/g, '&quot;')}">
 </head>
 <body>
   <script>
-    // Small delay to ensure cookies are processed before redirect
+    // CRITICAL: Wait longer to ensure cookies are fully processed before redirect
+    // Cookies set via Set-Cookie header need time to be stored by the browser
+    // Note: httpOnly cookies cannot be checked via document.cookie, so we just wait
+    // Using window.location.replace() instead of href to avoid history issues
+    // Using a longer delay (1000ms) to ensure browser has fully processed the Set-Cookie header
+    console.log('🔍 [AUTH_CALLBACK] HTML redirect script started:', {
+      redirectUrl: ${JSON.stringify(redirectUrl.toString())},
+      currentUrl: window.location.href,
+      currentOrigin: window.location.origin,
+      currentPathname: window.location.pathname,
+      cookieCount: document.cookie ? document.cookie.split(';').length : 0,
+      cookieNames: document.cookie ? document.cookie.split(';').map(c => c.split('=')[0].trim()) : [],
+      timestamp: new Date().toISOString(),
+    });
+    
     setTimeout(function() {
-      window.location.href = ${JSON.stringify(redirectUrl.toString())};
-    }, 100);
+      console.log('🔍 [AUTH_CALLBACK] Executing redirect:', {
+        redirectUrl: ${JSON.stringify(redirectUrl.toString())},
+        currentUrl: window.location.href,
+        cookieCount: document.cookie ? document.cookie.split(';').length : 0,
+        cookieNames: document.cookie ? document.cookie.split(';').map(c => c.split('=')[0].trim()) : [],
+        timestamp: new Date().toISOString(),
+      });
+      window.location.replace(${JSON.stringify(redirectUrl.toString())});
+    }, 1000);
   </script>
   <p>Redirecting to <a href="${redirectUrl.toString().replace(/"/g, '&quot;')}">${redirectUrl.toString().replace(/"/g, '&quot;')}</a>...</p>
 </body>
@@ -813,16 +920,24 @@ export async function GET(request: NextRequest) {
         if (sessionCookie && sessionCookie.value && sessionCookie.value.length > 0) {
           try {
             // CRITICAL: Always use secure=true for HTTPS, and ensure cookie options match Supabase expectations
+            // IMPORTANT: Do NOT set domain - let browser use default (current domain)
+            // IMPORTANT: Do NOT set maxAge - let Supabase manage expiration via session.expires_at
+            // Setting domain or maxAge incorrectly can prevent cookie from being sent
             htmlResponse.cookies.set(sessionCookie.name, sessionCookie.value, {
               path: '/',
               sameSite: 'lax' as const,
               httpOnly: true,
               secure: true, // Always secure for HTTPS
+              // Do NOT set domain - browser will use current domain
+              // Do NOT set maxAge - Supabase manages expiration
             });
+            const cookieOptions = { path: '/', sameSite: 'lax' as const, httpOnly: true, secure: true };
             console.log('✅ [AUTH_CALLBACK] Session cookie copied to HTML response:', {
               cookieName: sessionCookie.name,
               cookieLength: sessionCookie.value.length,
-              options: { path: '/', sameSite: 'lax', httpOnly: true, secure: true },
+              cookieValuePreview: sessionCookie.value.substring(0, 50) + '...',
+              options: cookieOptions,
+              optionsString: JSON.stringify(cookieOptions),
               timestamp: new Date().toISOString(),
             });
           } catch (error) {
@@ -859,12 +974,30 @@ export async function GET(request: NextRequest) {
         // Log response headers to verify Set-Cookie header is present
         const responseHeaders = Object.fromEntries(htmlResponse.headers.entries());
         const setCookieHeader = htmlResponse.headers.get('set-cookie') || htmlResponse.headers.get('Set-Cookie');
+        const allSetCookieHeaders = htmlResponse.headers.getAll('set-cookie') || htmlResponse.headers.getAll('Set-Cookie') || [];
         console.log('🔍 [AUTH_CALLBACK] Response headers (token verified):', {
-          headers: responseHeaders,
           headerCount: Object.keys(responseHeaders).length,
+          allHeaderKeys: Object.keys(responseHeaders),
           hasSetCookie: setCookieHeader !== null,
-          setCookieValue: setCookieHeader?.substring(0, 100) + '...',
-          allHeaderKeys: Array.from(htmlResponse.headers.keys()),
+          setCookieHeaderCount: allSetCookieHeaders.length,
+          setCookieHeaders: allSetCookieHeaders.map((h, i) => ({
+            index: i,
+            length: h.length,
+            preview: h.substring(0, 150) + '...',
+            fullHeader: h,
+          })),
+          setCookieValue: setCookieHeader?.substring(0, 200) + '...',
+          setCookieFullLength: setCookieHeader?.length || 0,
+          responseCookiesCount: responseCookies.length,
+          responseCookiesDetails: responseCookies.map(c => ({
+            name: c.name,
+            valueLength: c.value.length,
+            valuePreview: c.value.substring(0, 50) + '...',
+            hasPath: c.name.includes('path') || c.value.includes('Path='),
+            hasSecure: c.name.includes('secure') || c.value.includes('Secure'),
+            hasHttpOnly: c.name.includes('httpOnly') || c.value.includes('HttpOnly'),
+            hasSameSite: c.name.includes('sameSite') || c.value.includes('SameSite'),
+          })),
           timestamp: new Date().toISOString(),
         });
         
