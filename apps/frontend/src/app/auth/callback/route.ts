@@ -486,19 +486,6 @@ export async function GET(request: NextRequest) {
         const allCookies = cookieStoreAfterSession.getAll();
         const cookieGetDuration = Date.now() - cookieGetStartTime;
         
-        // Check specifically for the session cookie
-        const sessionCookie = allCookies.find(c => 
-          c.name === 'sb-supabase-kong-auth-token' || 
-          c.name.includes('supabase') && c.name.includes('auth-token') && !c.name.includes('code-verifier')
-        );
-        
-        console.log('🔍 [AUTH_CALLBACK] Session cookie check:', {
-          hasSessionCookie: !!sessionCookie,
-          sessionCookieName: sessionCookie?.name,
-          sessionCookieLength: sessionCookie?.value?.length || 0,
-          timestamp: new Date().toISOString(),
-        });
-        
         console.log('🔍 [AUTH_CALLBACK] Cookies retrieved:', {
           cookiesCount: allCookies.length,
           cookieNames: allCookies.map(c => c.name),
