@@ -108,34 +108,29 @@ export async function GET(request: NextRequest) {
       let error: any = null;
       
       // First, try exchangeCodeForSession (for PKCE flow)
+      // This is the standard method for PKCE magic link tokens
       console.log('🔄 Trying exchangeCodeForSession for PKCE token...');
       const exchangeResult = await supabase.auth.exchangeCodeForSession(token);
       
       if (exchangeResult.error) {
-        console.log('⚠️ exchangeCodeForSession failed, trying verifyOtp:', exchangeResult.error.message);
+        console.log('⚠️ exchangeCodeForSession failed, trying verifyOtp with token_hash:', exchangeResult.error.message);
         
         // Fall back to verifyOtp with token_hash
+        // For PKCE tokens, we use token_hash (not token + email)
         const verifyResult = await supabase.auth.verifyOtp({
           token_hash: token,
           type: finalType as any,
         });
         
         if (verifyResult.error) {
-          console.log('⚠️ verifyOtp with token_hash failed, trying token directly:', verifyResult.error.message);
-          
-          // Last resort: try verifyOtp with token (not token_hash)
-          const verifyResult2 = await supabase.auth.verifyOtp({
-            token: token,
-            type: finalType as any,
+          // Both methods failed - this token format is not supported
+          error = verifyResult.error;
+          console.error('❌ All verification methods failed:', {
+            exchangeError: exchangeResult.error.message,
+            verifyError: verifyResult.error.message,
+            tokenPrefix: token.substring(0, 20),
+            type: finalType,
           });
-          
-          if (verifyResult2.error) {
-            error = verifyResult2.error;
-            console.error('❌ All verification methods failed');
-          } else {
-            data = verifyResult2.data;
-            console.log('✅ verifyOtp with token succeeded');
-          }
         } else {
           data = verifyResult.data;
           console.log('✅ verifyOtp with token_hash succeeded');
