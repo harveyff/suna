@@ -336,6 +336,10 @@ export async function POST(request: NextRequest) {
       baseUrl = request.nextUrl.origin;
     }
 
+    // Determine if we're in a secure context (HTTPS)
+    // Don't force secure=true if we're not in HTTPS (for development/local)
+    const isSecure = forwardedProto === 'https' || baseUrl.startsWith('https');
+
     const redirectUrl = new URL(returnUrl, baseUrl);
     redirectUrl.searchParams.set('auth_event', authEvent);
     redirectUrl.searchParams.set('auth_method', 'email_otp');
@@ -370,10 +374,6 @@ export async function POST(request: NextRequest) {
     });
     
     const response = NextResponse.redirect(redirectUrl);
-    
-    // Determine if we're in a secure context (HTTPS)
-    // Don't force secure=true if we're not in HTTPS (for development/local)
-    const isSecure = forwardedProto === 'https' || baseUrl.startsWith('https');
     
     // CRITICAL: Copy cookies from cookieMap first (most reliable source)
     // Then also copy from supabaseResponse as backup
