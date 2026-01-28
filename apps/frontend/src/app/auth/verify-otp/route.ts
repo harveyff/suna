@@ -416,11 +416,11 @@ export async function POST(request: NextRequest) {
     // Don't force secure=true if we're not in HTTPS (for development/local)
     const isSecure = forwardedProto === 'https' || baseUrl.startsWith('https');
 
-    // CRITICAL FIX: Use relative path redirect instead of absolute URL
-    // This ensures Next.js properly handles cookies in the redirect response
-    // According to Next.js docs, relative paths preserve cookies automatically
+    // CRITICAL FIX: Use calculated baseUrl instead of request.nextUrl.origin
+    // request.nextUrl.origin may return https://0.0.0.0:3000 which is invalid for external access
+    // baseUrl is calculated from forwarded headers and is the correct external URL
     const redirectPath = returnUrl.startsWith('/') ? returnUrl : `/${returnUrl}`;
-    const redirectUrlObj = new URL(redirectPath, request.nextUrl.origin);
+    const redirectUrlObj = new URL(redirectPath, baseUrl);
     redirectUrlObj.searchParams.set('auth_event', authEvent);
     redirectUrlObj.searchParams.set('auth_method', 'email_otp');
     
