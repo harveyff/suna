@@ -76,6 +76,16 @@ function LoginContent() {
     fullSearchParams: typeof window !== 'undefined' ? window.location.search : 'N/A',
     timestamp: new Date().toISOString(),
   });
+  
+  // CRITICAL: Log component mount to ensure it's rendering
+  useEffect(() => {
+    console.log('✅ [Auth Page] Component mounted/updated:', {
+      isExpired,
+      isPkceExpired,
+      expiredEmail,
+      timestamp: new Date().toISOString(),
+    });
+  }, []);
 
   const isSignUp = mode !== 'signin';
   const [referralCode, setReferralCode] = useState(referralCodeParam);
@@ -133,13 +143,22 @@ function LoginContent() {
   const [expiredEmailState, setExpiredEmailState] = useState(expiredEmail);
   
   // CRITICAL: Log initial state
+  const linkExpiredInitial = isExpired && !isPkceExpired;
+  const shouldShowOtpInputInitial = linkExpiredInitial || (isPkceExpired && !!expiredEmail);
+  
   console.log('🔍 [Auth Page] Initial State:', {
     isExpired,
     isPkceExpired,
     expiredEmail,
-    linkExpiredInitial: isExpired && !isPkceExpired,
+    linkExpiredInitial,
     expiredEmailStateInitial: expiredEmail,
-    shouldShowOtpInputInitial: (isExpired && !isPkceExpired) || (isPkceExpired && expiredEmail),
+    shouldShowOtpInputInitial,
+    calculation: {
+      linkExpiredPart: linkExpiredInitial,
+      pkceExpiredPart: isPkceExpired && !!expiredEmail,
+      pkceExpired: isPkceExpired,
+      hasExpiredEmail: !!expiredEmail,
+    },
     timestamp: new Date().toISOString(),
   });
   const [resendEmail, setResendEmail] = useState('');
@@ -567,7 +586,8 @@ function LoginContent() {
 
   // Expired link view OR PKCE expired view (both show OTP input)
   // CRITICAL: When pkce_expired=true, we should also show OTP input even if linkExpired is false
-  const shouldShowOtpInput = linkExpired || (isPkceExpired && expiredEmailState);
+  // CRITICAL: Use !! to ensure boolean result, not string (isPkceExpired && expiredEmailState returns string if expiredEmailState is truthy)
+  const shouldShowOtpInput = linkExpired || (isPkceExpired && !!expiredEmailState);
   
   console.log('🔍 [Auth Page] Render decision:', {
     linkExpired,
@@ -582,10 +602,11 @@ function LoginContent() {
     user: !!user,
     calculation: {
       linkExpiredPart: linkExpired,
-      pkceExpiredPart: isPkceExpired && expiredEmailState,
+      pkceExpiredPart: !!(isPkceExpired && expiredEmailState), // CRITICAL: Use !! to ensure boolean
       pkceExpired: isPkceExpired,
       hasExpiredEmailState: !!expiredEmailState,
       hasExpiredEmail: !!expiredEmail,
+      finalCalculation: `${linkExpired} || (${isPkceExpired} && !!${expiredEmailState}) = ${shouldShowOtpInput}`,
     },
     timestamp: new Date().toISOString(),
   });
