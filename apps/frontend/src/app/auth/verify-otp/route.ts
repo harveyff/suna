@@ -347,6 +347,11 @@ export async function POST(request: NextRequest) {
       hasSession: !!session,
       hasCookies: authCookies.length > 0,
       cookieNames: authCookies.map(c => c.name),
+      sessionExpiresAt: session.expires_at,
+      sessionExpiresAtDate: session.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'N/A',
+      baseUrl,
+      forwardedProto,
+      isSecure,
       timestamp: new Date().toISOString(),
     });
 
@@ -383,12 +388,31 @@ export async function POST(request: NextRequest) {
     cookieMap.forEach((cookieData, name) => {
       if (name.startsWith('sb-')) {
         const cookieOptions = cookieData.options || {};
+        
+        // CRITICAL: Calculate maxAge from session expires_at if not provided
+        // Session expires_at is in seconds since epoch, maxAge is in seconds from now
+        let maxAge = cookieOptions.maxAge;
+        if (!maxAge && session?.expires_at) {
+          const expiresAtSeconds = session.expires_at;
+          const nowSeconds = Math.floor(Date.now() / 1000);
+          maxAge = Math.max(expiresAtSeconds - nowSeconds, 3600); // At least 1 hour
+          
+          console.log('🍪 [verifyOtp Route] Calculated maxAge from session:', {
+            name,
+            expiresAtSeconds,
+            nowSeconds,
+            maxAge,
+            maxAgeHours: Math.floor(maxAge / 3600),
+            timestamp: new Date().toISOString(),
+          });
+        }
+        
         response.cookies.set(name, cookieData.value, {
           path: cookieOptions.path || '/',
           sameSite: cookieOptions.sameSite || 'lax',
           secure: cookieOptions.secure !== undefined ? cookieOptions.secure : isSecure,
           httpOnly: cookieOptions.httpOnly !== undefined ? cookieOptions.httpOnly : true,
-          maxAge: cookieOptions.maxAge,
+          maxAge: maxAge || cookieOptions.maxAge || 3600 * 24 * 7, // Default 7 days if not set
         });
         
         console.log('🍪 [verifyOtp Route] Cookie set from map:', {
@@ -396,6 +420,9 @@ export async function POST(request: NextRequest) {
           hasValue: !!cookieData.value,
           valueLength: cookieData.value?.length || 0,
           secure: cookieOptions.secure !== undefined ? cookieOptions.secure : isSecure,
+          maxAge: maxAge || cookieOptions.maxAge || 3600 * 24 * 7,
+          path: cookieOptions.path || '/',
+          sameSite: cookieOptions.sameSite || 'lax',
           timestamp: new Date().toISOString(),
         });
       }
@@ -405,9 +432,19 @@ export async function POST(request: NextRequest) {
     const supabaseResponseCookies = supabaseResponse.cookies.getAll();
     supabaseResponseCookies.forEach(cookie => {
       if (cookie.name.startsWith('sb-') && !cookieMap.has(cookie.name)) {
+        // Calculate maxAge from session if available
+        let maxAge = 3600 * 24 * 7; // Default 7 days
+        if (session?.expires_at) {
+          const expiresAtSeconds = session.expires_at;
+          const nowSeconds = Math.floor(Date.now() / 1000);
+          maxAge = Math.max(expiresAtSeconds - nowSeconds, 3600); // At least 1 hour
+        }
+        
         console.log('🍪 [verifyOtp Route] Adding cookie from supabaseResponse (backup):', {
           name: cookie.name,
           hasValue: !!cookie.value,
+          maxAge,
+          maxAgeHours: Math.floor(maxAge / 3600),
           timestamp: new Date().toISOString(),
         });
         response.cookies.set(cookie.name, cookie.value, {
@@ -415,6 +452,7 @@ export async function POST(request: NextRequest) {
           sameSite: 'lax',
           secure: isSecure,
           httpOnly: true,
+          maxAge,
         });
       }
     });
@@ -423,9 +461,19 @@ export async function POST(request: NextRequest) {
     requestAuthCookies.forEach(cookie => {
       // Only set if not already in response
       if (!cookieMap.has(cookie.name) && !supabaseResponseCookies.find(c => c.name === cookie.name)) {
+        // Calculate maxAge from session if available
+        let maxAge = 3600 * 24 * 7; // Default 7 days
+        if (session?.expires_at) {
+          const expiresAtSeconds = session.expires_at;
+          const nowSeconds = Math.floor(Date.now() / 1000);
+          maxAge = Math.max(expiresAtSeconds - nowSeconds, 3600); // At least 1 hour
+        }
+        
         console.log('🍪 [verifyOtp Route] Adding cookie from request:', {
           name: cookie.name,
           hasValue: !!cookie.value,
+          maxAge,
+          maxAgeHours: Math.floor(maxAge / 3600),
           timestamp: new Date().toISOString(),
         });
         response.cookies.set(cookie.name, cookie.value, {
@@ -433,6 +481,7 @@ export async function POST(request: NextRequest) {
           sameSite: 'lax',
           secure: isSecure,
           httpOnly: true,
+          maxAge,
         });
       }
     });
