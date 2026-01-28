@@ -117,7 +117,9 @@ function LoginContent() {
   const [registrationEmail, setRegistrationEmail] = useState('');
 
   // Expired link state
-  const [linkExpired, setLinkExpired] = useState(isExpired);
+  // CRITICAL: If pkce_expired=true, don't treat it as "expired link" - it's just PKCE flow state loss
+  // The user should see OTP input directly, not "link expired" message
+  const [linkExpired, setLinkExpired] = useState(isExpired && !isPkceExpired);
   const [expiredEmailState, setExpiredEmailState] = useState(expiredEmail);
   const [resendEmail, setResendEmail] = useState('');
   const [otpCode, setOtpCode] = useState('');
@@ -137,20 +139,38 @@ function LoginContent() {
   }, [isSuccessMessage]);
 
   useEffect(() => {
-    if (isExpired) {
+    // Only set linkExpired if it's a real expired link, not PKCE flow state loss
+    if (isExpired && !isPkceExpired) {
       setLinkExpired(true);
       if (expiredEmail) {
         setExpiredEmailState(expiredEmail);
       }
+    } else if (isPkceExpired && expiredEmail) {
+      // PKCE expired: Set email but don't show "link expired" message
+      // Instead, trigger auto-send of OTP code
+      setExpiredEmailState(expiredEmail);
+      setLinkExpired(false); // Don't show expired link view
     }
-  }, [isExpired, expiredEmail]);
+  }, [isExpired, isPkceExpired, expiredEmail]);
 
-  // Auto-send new OTP code when link expires (if we have the email)
+  // Auto-send new OTP code when link expires OR when PKCE flow state is lost (if we have the email)
   useEffect(() => {
     const autoSendNewCode = async () => {
-      if (!isExpired || !expiredEmail || autoSendAttempted.current || isLoading || user) {
+      // Trigger auto-send if:
+      // 1. Link expired (isExpired && !isPkceExpired), OR
+      // 2. PKCE flow state lost (isPkceExpired)
+      const shouldAutoSend = (isExpired || isPkceExpired) && expiredEmail && !autoSendAttempted.current && !isLoading && !user;
+      
+      if (!shouldAutoSend) {
         return;
       }
+
+      console.log('🔄 [Auth Page] Auto-sending OTP code:', {
+        isExpired,
+        isPkceExpired,
+        email: expiredEmail,
+        timestamp: new Date().toISOString(),
+      });
 
       autoSendAttempted.current = true;
       setAutoSendingCode(true);
@@ -162,11 +182,24 @@ function LoginContent() {
         if (response.success) {
           setNewCodeSent(true);
           setAutoSendError(false);
+          console.log('✅ [Auth Page] OTP code auto-sent successfully:', {
+            email: expiredEmail,
+            timestamp: new Date().toISOString(),
+          });
         } else {
           setAutoSendError(true);
+          console.error('❌ [Auth Page] Auto-send failed:', {
+            email: expiredEmail,
+            response,
+            timestamp: new Date().toISOString(),
+          });
         }
       } catch (error) {
-        console.error('Auto-send failed:', error);
+        console.error('❌ [Auth Page] Auto-send error:', {
+          error: error instanceof Error ? error.message : String(error),
+          email: expiredEmail,
+          timestamp: new Date().toISOString(),
+        });
         setAutoSendError(true);
       } finally {
         setAutoSendingCode(false);
@@ -174,7 +207,7 @@ function LoginContent() {
     };
 
     autoSendNewCode();
-  }, [isExpired, expiredEmail, isLoading, user]);
+  }, [isExpired, isPkceExpired, expiredEmail, isLoading, user]);
 
   const handleAuth = async (prevState: any, formData: FormData) => {
     trackSendAuthLink();
@@ -643,12 +676,17 @@ function LoginContent() {
 
                 <div className="text-center space-y-2">
                   <h1 className="text-[28px] sm:text-[32px] font-normal tracking-tight text-foreground leading-none">
-                    {t('magicLinkExpired')}
+                    {isPkceExpired 
+                      ? 'Sending verification code'
+                      : t('magicLinkExpired')
+                    }
                   </h1>
                   <p className="text-[15px] text-foreground/50 max-w-[280px]">
-                    {autoSendError
-                      ? "We couldn't send a code automatically. Try again below."
-                      : t('magicLinkExpiredDescription')
+                    {isPkceExpired
+                      ? "Sending a code to your email..."
+                      : autoSendError
+                        ? "We couldn't send a code automatically. Try again below."
+                        : t('magicLinkExpiredDescription')
                     }
                   </p>
                 </div>
