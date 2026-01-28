@@ -328,35 +328,68 @@ export async function verifyOtp(prevState: any, formData: FormData) {
     return { message: 'Please enter a valid email address' };
   }
 
-  if (!token || token.length !== 6) {
-    console.error('❌ [verifyOtp Server Action] Invalid token length:', { tokenLength: token?.length || 0, timestamp: new Date().toISOString() });
-    return { message: 'Please enter the 6-digit code from your email' };
+  // Normalize token: remove all non-digit characters and trim whitespace
+  // This handles cases where users might paste codes with spaces, dashes, etc.
+  const normalizedTokenInput = token.replace(/\D/g, '').trim();
+  
+  if (!normalizedTokenInput || normalizedTokenInput.length !== 6) {
+    console.error('❌ [verifyOtp Server Action] Invalid token format:', {
+      originalToken: token ? `${token.substring(0, 2)}****` : 'MISSING',
+      originalLength: token?.length || 0,
+      normalizedToken: normalizedTokenInput ? `${normalizedTokenInput.substring(0, 2)}****` : 'MISSING',
+      normalizedLength: normalizedTokenInput?.length || 0,
+      timestamp: new Date().toISOString(),
+    });
+    return { message: 'Please enter a valid 6-digit code from your email' };
   }
 
   console.log('🔐 [verifyOtp Server Action] Creating Supabase client...', { timestamp: new Date().toISOString() });
   const supabase = await createClient();
 
+  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedToken = normalizedTokenInput;
+  
   console.log('🔐 [verifyOtp] Starting OTP verification:', {
-    email: email.trim().toLowerCase(),
-    tokenLength: token.trim().length,
+    email: normalizedEmail,
+    tokenLength: normalizedToken.length,
     returnUrl,
     timestamp: new Date().toISOString(),
   });
 
-  // Use 'email' type for 6-digit OTP codes
-  // 'magiclink' is for link-based verification, not OTP codes
-  console.log('🔐 [verifyOtp Server Action] Calling supabase.auth.verifyOtp with type=email...', {
-    email: email.trim().toLowerCase(),
-    tokenLength: token.trim().length,
-    type: 'email',
+  // IMPORTANT: Backend uses generate_link with type="magiclink" but extracts email_otp
+  // The OTP token from generate_link should be verified with type="magiclink", not "email"
+  // However, if the code was sent via signInWithOtp with shouldSendOtpCode=true, use type="email"
+  // Since we're using backend API /auth/send-otp which uses generate_link, try 'magiclink' first
+  console.log('🔐 [verifyOtp Server Action] Calling supabase.auth.verifyOtp with type=magiclink...', {
+    email: normalizedEmail,
+    tokenLength: normalizedToken.length,
+    type: 'magiclink',
     timestamp: new Date().toISOString(),
   });
 
-  const { data, error } = await supabase.auth.verifyOtp({
-    email: email.trim().toLowerCase(),
-    token: token.trim(),
-    type: 'email', // Changed from 'magiclink' to 'email' for 6-digit OTP codes
+  // Try 'magiclink' type first (backend uses generate_link)
+  let verifyResult = await supabase.auth.verifyOtp({
+    email: normalizedEmail,
+    token: normalizedToken,
+    type: 'magiclink', // Backend uses generate_link with type="magiclink"
   });
+  
+  // If 'magiclink' type fails, try 'email' type as fallback
+  if (verifyResult.error && verifyResult.error.code !== 'otp_expired') {
+    console.log('🔄 [verifyOtp Server Action] magiclink type failed, trying email type...', {
+      errorMessage: verifyResult.error?.message,
+      errorCode: verifyResult.error?.code,
+      timestamp: new Date().toISOString(),
+    });
+    
+    verifyResult = await supabase.auth.verifyOtp({
+      email: normalizedEmail,
+      token: normalizedToken,
+      type: 'email', // Fallback to email type
+    });
+  }
+  
+  const { data, error } = verifyResult;
   
   console.log('🔐 [verifyOtp Server Action] verifyOtp response received:', {
     hasData: !!data,
@@ -364,6 +397,8 @@ export async function verifyOtp(prevState: any, formData: FormData) {
     errorMessage: error?.message,
     errorCode: error?.code,
     userId: data?.user?.id,
+    hasSession: !!data?.session,
+    typeUsed: error ? 'magiclink -> email (fallback)' : 'magiclink',
     timestamp: new Date().toISOString(),
   });
 
