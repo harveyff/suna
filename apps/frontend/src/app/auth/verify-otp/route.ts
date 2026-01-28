@@ -175,9 +175,30 @@ export async function POST(request: NextRequest) {
             });
             
             // Store cookies in map for later use
+            // CRITICAL: Log cookie values to debug empty code-verifier issue
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieMap.set(name, { value, options });
-              request.cookies.set(name, value);
+              console.log('🍪 [verifyOtp Route] Cookie being set:', {
+                name,
+                hasValue: !!value,
+                valueLength: value?.length || 0,
+                valuePreview: value ? (value.length > 20 ? value.substring(0, 20) + '...' : value) : 'EMPTY',
+                isCodeVerifier: name.includes('code-verifier'),
+                timestamp: new Date().toISOString(),
+              });
+              
+              // Only store non-empty cookies (empty cookies might cause issues)
+              if (value && value.trim() !== '') {
+                cookieMap.set(name, { value, options });
+                request.cookies.set(name, value);
+              } else {
+                console.warn('⚠️ [verifyOtp Route] Skipping empty cookie:', {
+                  name,
+                  reason: 'Cookie value is empty or whitespace',
+                  timestamp: new Date().toISOString(),
+                });
+                // Delete empty cookie if it exists
+                request.cookies.delete(name);
+              }
             });
             
             // Recreate response with updated cookies
@@ -185,14 +206,24 @@ export async function POST(request: NextRequest) {
               request,
             });
             
-            // Set cookies in the response
+            // Set cookies in the response (only non-empty ones)
             cookiesToSet.forEach(({ name, value, options }) => {
-              supabaseResponse.cookies.set(name, value, options || {});
+              if (value && value.trim() !== '') {
+                supabaseResponse.cookies.set(name, value, options || {});
+              } else {
+                // Delete empty cookie from response
+                supabaseResponse.cookies.delete(name);
+              }
             });
             
             console.log('🍪 [verifyOtp Route] Cookies stored in map:', {
               cookieCount: cookieMap.size,
               cookieNames: Array.from(cookieMap.keys()),
+              cookieDetails: Array.from(cookieMap.entries()).map(([name, data]) => ({
+                name,
+                hasValue: !!data.value,
+                valueLength: data.value?.length || 0,
+              })),
               timestamp: new Date().toISOString(),
             });
           },
@@ -628,9 +659,10 @@ export async function POST(request: NextRequest) {
     // CRITICAL FIX: Create redirect response, then copy cookies from supabaseResponse
     // supabaseResponse is the authoritative source managed by Supabase SSR
     // According to Supabase SSR docs, cookies set via setAll() are stored in the response
+    // Use 303 See Other instead of 307 to convert POST to GET (dashboard only handles GET)
     let response: NextResponse;
     try {
-      response = NextResponse.redirect(redirectUrlObj, { status: 307 });
+      response = NextResponse.redirect(redirectUrlObj, { status: 303 });
     } catch (redirectError) {
       console.error('❌ [verifyOtp Route] Failed to create redirect response:', {
         error: redirectError instanceof Error ? redirectError.message : String(redirectError),
@@ -658,6 +690,17 @@ export async function POST(request: NextRequest) {
     
     try {
       supabaseCookies.forEach(cookie => {
+        // CRITICAL: Skip empty cookies - they can cause authentication issues
+        if (!cookie.value || cookie.value.trim() === '') {
+          console.warn('⚠️ [verifyOtp Route] Skipping empty cookie when copying to redirect:', {
+            cookieName: cookie.name,
+            timestamp: new Date().toISOString(),
+          });
+          // Delete empty cookie from redirect response
+          response.cookies.delete(cookie.name);
+          return;
+        }
+        
         // Calculate maxAge from session if cookie doesn't have it
         let maxAge = cookie.maxAge;
         if (!maxAge && session?.expires_at) {
@@ -673,6 +716,14 @@ export async function POST(request: NextRequest) {
             secure: cookie.secure !== undefined ? cookie.secure : isSecure,
             httpOnly: cookie.httpOnly !== undefined ? cookie.httpOnly : true,
             maxAge: maxAge || cookie.maxAge || 3600 * 24 * 7, // Default 7 days
+          });
+          
+          console.log('✅ [verifyOtp Route] Cookie set in redirect:', {
+            cookieName: cookie.name,
+            hasValue: !!cookie.value,
+            valueLength: cookie.value.length,
+            maxAge,
+            timestamp: new Date().toISOString(),
           });
         } catch (cookieSetError) {
           console.error('❌ [verifyOtp Route] Failed to set cookie:', {
@@ -740,7 +791,7 @@ export async function POST(request: NextRequest) {
         secure: c.secure || false,
         sameSite: c.sameSite || 'lax',
       })),
-      redirectStatus: 307,
+      redirectStatus: 303,
       timestamp: new Date().toISOString(),
     });
     
