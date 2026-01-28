@@ -178,29 +178,38 @@ export async function POST(request: NextRequest) {
     // Use the already normalized token from validation above
     const normalizedToken = normalizedTokenInput;
     
-    console.log('🔐 [verifyOtp Route] Calling supabase.auth.verifyOtp with type=email...', {
+    // CRITICAL FIX: Backend uses generate_link with type="magiclink" but extracts email_otp
+    // According to Supabase docs, email_otp from generate_link should be verified with type="email"
+    // NOT type="magiclink" - magiclink type is for the actual magic link URL, not the OTP code
+    // Since backend extracts email_otp and sends it as a 6-digit code, use 'email' type first
+    console.log('🔐 [verifyOtp Route] Calling supabase.auth.verifyOtp with type=email (primary)...', {
       email: normalizedEmail,
       tokenLength: normalizedToken.length,
       tokenPrefix: normalizedToken.substring(0, 2) + '****',
       type: 'email',
+      reason: 'Backend extracts email_otp from generate_link - email_otp uses type="email"',
       supabaseUrl: supabaseUrl.substring(0, 50) + '...',
       timestamp: new Date().toISOString(),
     });
-
-    // IMPORTANT: Backend uses generate_link with type="magiclink" but extracts email_otp
-    // The OTP token from generate_link should be verified with type="magiclink", not "email"
-    // However, if the code was sent via signInWithOtp with shouldSendOtpCode=true, use type="email"
-    // Since we're using backend API /auth/send-otp which uses generate_link, try 'magiclink' first
+    
+    // Try 'email' type first - this is correct for email_otp from generate_link
     let verifyResult = await supabase.auth.verifyOtp({
       email: normalizedEmail,
       token: normalizedToken,
-      type: 'magiclink', // Backend uses generate_link with type="magiclink"
+      type: 'email', // email_otp from generate_link uses type="email"
     });
     
-    // If 'magiclink' type fails, try 'email' type as fallback
-    // This handles cases where OTP was sent via signInWithOtp with shouldSendOtpCode=true
-    if (verifyResult.error && verifyResult.error.code !== 'otp_expired') {
-      console.log('🔄 [verifyOtp Route] magiclink type failed, trying email type...', {
+    // If 'email' type fails with specific error, try 'magiclink' as fallback
+    // This handles edge cases where the token might be a magic link token instead
+    const shouldRetryWithMagiclink = verifyResult.error && 
+      verifyResult.error.code !== 'otp_expired' &&
+      verifyResult.error.code !== 'expired_token' &&
+      verifyResult.error.code !== 'token_expired' &&
+      verifyResult.error.code !== 'invalid_token' &&
+      verifyResult.error.code !== 'invalid_grant';
+    
+    if (shouldRetryWithMagiclink) {
+      console.log('🔄 [verifyOtp Route] email type failed with retryable error, trying magiclink type...', {
         errorMessage: verifyResult.error?.message,
         errorCode: verifyResult.error?.code,
         timestamp: new Date().toISOString(),
@@ -209,7 +218,13 @@ export async function POST(request: NextRequest) {
       verifyResult = await supabase.auth.verifyOtp({
         email: normalizedEmail,
         token: normalizedToken,
-        type: 'email', // Fallback to email type
+        type: 'magiclink', // Fallback to magiclink type
+      });
+    } else if (verifyResult.error) {
+      console.log('⏭️ [verifyOtp Route] Skipping magiclink type retry - token is expired or invalid:', {
+        errorMessage: verifyResult.error?.message,
+        errorCode: verifyResult.error?.code,
+        timestamp: new Date().toISOString(),
       });
     }
     
@@ -221,7 +236,7 @@ export async function POST(request: NextRequest) {
       errorStatus: verifyResult.error?.status,
       userId: verifyResult.data?.user?.id,
       hasSession: !!verifyResult.data?.session,
-      typeUsed: verifyResult.error ? 'magiclink -> email (fallback)' : 'magiclink',
+      typeUsed: verifyResult.error ? 'email -> magiclink (fallback)' : 'email',
       timestamp: new Date().toISOString(),
     });
     
@@ -235,7 +250,7 @@ export async function POST(request: NextRequest) {
         email: normalizedEmail,
         tokenLength: normalizedToken.length,
         tokenPrefix: normalizedToken.substring(0, 2) + '****',
-        typeUsed: verifyResult.error ? 'magiclink -> email (fallback)' : 'magiclink',
+        typeUsed: verifyResult.error ? 'email -> magiclink (fallback)' : 'email',
         supabaseUrl: supabaseUrl.substring(0, 50) + '...',
         timestamp: new Date().toISOString(),
       });
