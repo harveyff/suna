@@ -175,10 +175,27 @@ function LoginContent() {
   // Auto-send new OTP code when link expires OR when PKCE flow state is lost (if we have the email)
   useEffect(() => {
     const autoSendNewCode = async () => {
+      // Use expiredEmailState (state) instead of expiredEmail (URL param) for more reliable checking
+      // expiredEmailState is set in the useEffect above when isPkceExpired or isExpired is true
+      const emailToUse = expiredEmailState || expiredEmail;
+      
       // Trigger auto-send if:
       // 1. Link expired (isExpired && !isPkceExpired), OR
       // 2. PKCE flow state lost (isPkceExpired)
-      const shouldAutoSend = (isExpired || isPkceExpired) && expiredEmail && !autoSendAttempted.current && !isLoading && !user;
+      const shouldAutoSend = (isExpired || isPkceExpired) && emailToUse && !autoSendAttempted.current && !isLoading && !user;
+      
+      console.log('🔍 [Auth Page] Auto-send check:', {
+        isExpired,
+        isPkceExpired,
+        expiredEmail,
+        expiredEmailState,
+        emailToUse,
+        autoSendAttempted: autoSendAttempted.current,
+        isLoading,
+        user: !!user,
+        shouldAutoSend,
+        timestamp: new Date().toISOString(),
+      });
       
       if (!shouldAutoSend) {
         return;
@@ -187,7 +204,7 @@ function LoginContent() {
       console.log('🔄 [Auth Page] Auto-sending OTP code:', {
         isExpired,
         isPkceExpired,
-        email: expiredEmail,
+        email: emailToUse,
         timestamp: new Date().toISOString(),
       });
 
@@ -196,19 +213,19 @@ function LoginContent() {
 
       try {
         // Call backend API to send OTP-only email
-        const response = await backendApi.post('/auth/send-otp', { email: expiredEmail });
+        const response = await backendApi.post('/auth/send-otp', { email: emailToUse });
 
         if (response.success) {
           setNewCodeSent(true);
           setAutoSendError(false);
           console.log('✅ [Auth Page] OTP code auto-sent successfully:', {
-            email: expiredEmail,
+            email: emailToUse,
             timestamp: new Date().toISOString(),
           });
         } else {
           setAutoSendError(true);
           console.error('❌ [Auth Page] Auto-send failed:', {
-            email: expiredEmail,
+            email: emailToUse,
             response,
             timestamp: new Date().toISOString(),
           });
@@ -216,7 +233,7 @@ function LoginContent() {
       } catch (error) {
         console.error('❌ [Auth Page] Auto-send error:', {
           error: error instanceof Error ? error.message : String(error),
-          email: expiredEmail,
+          email: emailToUse,
           timestamp: new Date().toISOString(),
         });
         setAutoSendError(true);
@@ -224,9 +241,9 @@ function LoginContent() {
         setAutoSendingCode(false);
       }
     };
-
+    
     autoSendNewCode();
-  }, [isExpired, isPkceExpired, expiredEmail, isLoading, user]);
+  }, [isExpired, isPkceExpired, expiredEmail, expiredEmailState, isLoading, user]);
 
   const handleAuth = async (prevState: any, formData: FormData) => {
     trackSendAuthLink();
