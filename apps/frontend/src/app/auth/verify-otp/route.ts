@@ -416,12 +416,17 @@ export async function POST(request: NextRequest) {
     // Don't force secure=true if we're not in HTTPS (for development/local)
     const isSecure = forwardedProto === 'https' || baseUrl.startsWith('https');
 
-    const redirectUrl = new URL(returnUrl, baseUrl);
-    redirectUrl.searchParams.set('auth_event', authEvent);
-    redirectUrl.searchParams.set('auth_method', 'email_otp');
+    // CRITICAL FIX: Use relative path redirect instead of absolute URL
+    // This ensures Next.js properly handles cookies in the redirect response
+    // According to Next.js docs, relative paths preserve cookies automatically
+    const redirectPath = returnUrl.startsWith('/') ? returnUrl : `/${returnUrl}`;
+    const redirectUrlObj = new URL(redirectPath, request.nextUrl.origin);
+    redirectUrlObj.searchParams.set('auth_event', authEvent);
+    redirectUrlObj.searchParams.set('auth_method', 'email_otp');
     
     console.log('🔄 [verifyOtp Route] Redirecting after successful verification:', {
-      redirectTo: redirectUrl.toString(),
+      redirectPath: redirectUrlObj.pathname + redirectUrlObj.search,
+      redirectFullUrl: redirectUrlObj.toString(),
       authEvent,
       userId: session.user.id,
       hasSession: !!session,
@@ -429,139 +434,50 @@ export async function POST(request: NextRequest) {
       cookieNames: authCookies.map(c => c.name),
       sessionExpiresAt: session.expires_at,
       sessionExpiresAtDate: session.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'N/A',
-      baseUrl,
-      forwardedProto,
-      isSecure,
       timestamp: new Date().toISOString(),
     });
 
-    // CRITICAL: Create redirect response and ensure cookies are included
-    // Use cookieMap to ensure we have all cookies that were set by Supabase
-    // This is more reliable than relying on supabaseResponse which gets recreated
-    console.log('🔄 [verifyOtp Route] Creating redirect response with cookies...', {
-      redirectUrl: redirectUrl.toString(),
+    // CRITICAL: Use the latest supabaseResponse which has all cookies set
+    // Then modify it to redirect instead of creating a new response
+    // This preserves all cookies that were set by Supabase's setAll callback
+    console.log('🔄 [verifyOtp Route] Creating redirect from supabaseResponse...', {
+      redirectPath: redirectUrlObj.pathname + redirectUrlObj.search,
       cookieMapSize: cookieMap.size,
       cookieMapKeys: Array.from(cookieMap.keys()),
       supabaseResponseCookieCount: supabaseResponse.cookies.getAll().length,
       supabaseResponseCookieNames: supabaseResponse.cookies.getAll().map(c => c.name),
-      forwardedProto,
-      isSecure: forwardedProto === 'https',
       timestamp: new Date().toISOString(),
     });
     
-    // Use 307 (Temporary Redirect) - this is the standard for POST -> GET redirects
-    // Cookies should be preserved automatically by the browser
-    const response = NextResponse.redirect(redirectUrl, { status: 307 });
+    // CRITICAL FIX: Create redirect response, then copy cookies from supabaseResponse
+    // supabaseResponse is the authoritative source managed by Supabase SSR
+    // According to Supabase SSR docs, cookies set via setAll() are stored in the response
+    const response = NextResponse.redirect(redirectUrlObj, { status: 307 });
     
-    // CRITICAL: Copy cookies from cookieMap first (most reliable source)
-    // Then also copy from supabaseResponse as backup
-    console.log('🍪 [verifyOtp Route] Copying cookies to redirect response:', {
-      cookieMapSize: cookieMap.size,
-      cookieMapKeys: Array.from(cookieMap.keys()),
-      supabaseResponseCookieCount: supabaseResponse.cookies.getAll().length,
+    // Copy ALL cookies from supabaseResponse to the redirect response
+    const supabaseCookies = supabaseResponse.cookies.getAll();
+    console.log('🍪 [verifyOtp Route] Copying cookies from supabaseResponse to redirect:', {
+      supabaseCookieCount: supabaseCookies.length,
+      supabaseCookieNames: supabaseCookies.map(c => c.name),
       timestamp: new Date().toISOString(),
     });
     
-    // Copy from cookieMap (most reliable - contains all cookies set by Supabase)
-    cookieMap.forEach((cookieData, name) => {
-      if (name.startsWith('sb-')) {
-        const cookieOptions = cookieData.options || {};
-        
-        // CRITICAL: Calculate maxAge from session expires_at if not provided
-        // Session expires_at is in seconds since epoch, maxAge is in seconds from now
-        let maxAge = cookieOptions.maxAge;
-        if (!maxAge && session?.expires_at) {
-          const expiresAtSeconds = session.expires_at;
-          const nowSeconds = Math.floor(Date.now() / 1000);
-          maxAge = Math.max(expiresAtSeconds - nowSeconds, 3600); // At least 1 hour
-          
-          console.log('🍪 [verifyOtp Route] Calculated maxAge from session:', {
-            name,
-            expiresAtSeconds,
-            nowSeconds,
-            maxAge,
-            maxAgeHours: Math.floor(maxAge / 3600),
-            timestamp: new Date().toISOString(),
-          });
-        }
-        
-        response.cookies.set(name, cookieData.value, {
-          path: cookieOptions.path || '/',
-          sameSite: cookieOptions.sameSite || 'lax',
-          secure: cookieOptions.secure !== undefined ? cookieOptions.secure : isSecure,
-          httpOnly: cookieOptions.httpOnly !== undefined ? cookieOptions.httpOnly : true,
-          maxAge: maxAge || cookieOptions.maxAge || 3600 * 24 * 7, // Default 7 days if not set
-        });
-        
-        console.log('🍪 [verifyOtp Route] Cookie set from map:', {
-          name,
-          hasValue: !!cookieData.value,
-          valueLength: cookieData.value?.length || 0,
-          secure: cookieOptions.secure !== undefined ? cookieOptions.secure : isSecure,
-          maxAge: maxAge || cookieOptions.maxAge || 3600 * 24 * 7,
-          path: cookieOptions.path || '/',
-          sameSite: cookieOptions.sameSite || 'lax',
-          timestamp: new Date().toISOString(),
-        });
+    supabaseCookies.forEach(cookie => {
+      // Calculate maxAge from session if cookie doesn't have it
+      let maxAge = cookie.maxAge;
+      if (!maxAge && session?.expires_at) {
+        const expiresAtSeconds = session.expires_at;
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        maxAge = Math.max(expiresAtSeconds - nowSeconds, 3600); // At least 1 hour
       }
-    });
-    
-    // Also copy from supabaseResponse as backup (in case cookieMap missed something)
-    const supabaseResponseCookies = supabaseResponse.cookies.getAll();
-    supabaseResponseCookies.forEach(cookie => {
-      if (cookie.name.startsWith('sb-') && !cookieMap.has(cookie.name)) {
-        // Calculate maxAge from session if available
-        let maxAge = 3600 * 24 * 7; // Default 7 days
-        if (session?.expires_at) {
-          const expiresAtSeconds = session.expires_at;
-          const nowSeconds = Math.floor(Date.now() / 1000);
-          maxAge = Math.max(expiresAtSeconds - nowSeconds, 3600); // At least 1 hour
-        }
-        
-        console.log('🍪 [verifyOtp Route] Adding cookie from supabaseResponse (backup):', {
-          name: cookie.name,
-          hasValue: !!cookie.value,
-          maxAge,
-          maxAgeHours: Math.floor(maxAge / 3600),
-          timestamp: new Date().toISOString(),
-        });
-        response.cookies.set(cookie.name, cookie.value, {
-          path: '/',
-          sameSite: 'lax',
-          secure: isSecure,
-          httpOnly: true,
-          maxAge,
-        });
-      }
-    });
-    
-    // Also copy cookies from request.cookies (in case they were set there)
-    requestAuthCookies.forEach(cookie => {
-      // Only set if not already in response
-      if (!cookieMap.has(cookie.name) && !supabaseResponseCookies.find(c => c.name === cookie.name)) {
-        // Calculate maxAge from session if available
-        let maxAge = 3600 * 24 * 7; // Default 7 days
-        if (session?.expires_at) {
-          const expiresAtSeconds = session.expires_at;
-          const nowSeconds = Math.floor(Date.now() / 1000);
-          maxAge = Math.max(expiresAtSeconds - nowSeconds, 3600); // At least 1 hour
-        }
-        
-        console.log('🍪 [verifyOtp Route] Adding cookie from request:', {
-          name: cookie.name,
-          hasValue: !!cookie.value,
-          maxAge,
-          maxAgeHours: Math.floor(maxAge / 3600),
-          timestamp: new Date().toISOString(),
-        });
-        response.cookies.set(cookie.name, cookie.value, {
-          path: '/',
-          sameSite: 'lax',
-          secure: isSecure,
-          httpOnly: true,
-          maxAge,
-        });
-      }
+      
+      response.cookies.set(cookie.name, cookie.value, {
+        path: cookie.path || '/',
+        sameSite: (cookie.sameSite as 'lax' | 'strict' | 'none') || 'lax',
+        secure: cookie.secure !== undefined ? cookie.secure : isSecure,
+        httpOnly: cookie.httpOnly !== undefined ? cookie.httpOnly : true,
+        maxAge: maxAge || cookie.maxAge || 3600 * 24 * 7, // Default 7 days
+      });
     });
     
     console.log('🍪 [verifyOtp Route] Final cookies in redirect response:', {
@@ -599,7 +515,7 @@ export async function POST(request: NextRequest) {
     }
     
     console.log('✅ [verifyOtp Route] ===== Route Handler Success =====', {
-      redirectUrl: redirectUrl.toString(),
+      redirectUrl: redirectUrlObj.toString(),
       totalCookieCount: finalCookies.length,
       authCookieCount: finalAuthCookies.length,
       authCookieNames: finalAuthCookies.map(c => c.name),
@@ -619,10 +535,18 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('❌ [verifyOtp Route] Unexpected error:', {
       error: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : undefined,
+      errorName: error instanceof Error ? error.name : undefined,
       timestamp: new Date().toISOString(),
     });
+    
+    // Return detailed error for debugging
     return NextResponse.json(
-      { message: 'An unexpected error occurred' },
+      { 
+        message: 'An unexpected error occurred during OTP verification',
+        error: error instanceof Error ? error.message : String(error),
+        errorCode: 'UNEXPECTED_ERROR',
+      },
       { status: 500 }
     );
   }
