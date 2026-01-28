@@ -66,6 +66,16 @@ function LoginContent() {
   const expiredEmail = searchParams.get('email') || '';
   const referralCodeParam = searchParams.get('ref') || '';
   const t = useTranslations('auth');
+  
+  // CRITICAL: Log URL parameters immediately to debug
+  console.log('🔍 [Auth Page] URL Parameters:', {
+    isExpired,
+    isPkceExpired,
+    expiredEmail,
+    returnUrl,
+    fullSearchParams: typeof window !== 'undefined' ? window.location.search : 'N/A',
+    timestamp: new Date().toISOString(),
+  });
 
   const isSignUp = mode !== 'signin';
   const [referralCode, setReferralCode] = useState(referralCodeParam);
@@ -121,6 +131,17 @@ function LoginContent() {
   // The user should see OTP input directly, not "link expired" message
   const [linkExpired, setLinkExpired] = useState(isExpired && !isPkceExpired);
   const [expiredEmailState, setExpiredEmailState] = useState(expiredEmail);
+  
+  // CRITICAL: Log initial state
+  console.log('🔍 [Auth Page] Initial State:', {
+    isExpired,
+    isPkceExpired,
+    expiredEmail,
+    linkExpiredInitial: isExpired && !isPkceExpired,
+    expiredEmailStateInitial: expiredEmail,
+    shouldShowOtpInputInitial: (isExpired && !isPkceExpired) || (isPkceExpired && expiredEmail),
+    timestamp: new Date().toISOString(),
+  });
   const [resendEmail, setResendEmail] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [newCodeSent, setNewCodeSent] = useState(false);
@@ -552,10 +573,20 @@ function LoginContent() {
     linkExpired,
     isPkceExpired,
     expiredEmailState,
+    expiredEmail,
     shouldShowOtpInput,
     autoSendingCode,
     newCodeSent,
     autoSendError,
+    isLoading,
+    user: !!user,
+    calculation: {
+      linkExpiredPart: linkExpired,
+      pkceExpiredPart: isPkceExpired && expiredEmailState,
+      pkceExpired: isPkceExpired,
+      hasExpiredEmailState: !!expiredEmailState,
+      hasExpiredEmail: !!expiredEmail,
+    },
     timestamp: new Date().toISOString(),
   });
   
