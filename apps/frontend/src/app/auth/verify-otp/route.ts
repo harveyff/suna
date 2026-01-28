@@ -27,16 +27,31 @@ export async function POST(request: NextRequest) {
       url: request.url,
     });
     
+    // Parse form data from request
     const formData = await request.formData();
     const email = formData.get('email') as string;
     const token = formData.get('token') as string;
     const returnUrl = (formData.get('returnUrl') as string) || '/dashboard';
 
+    // Log all form data entries for debugging
+    const allFormData: Record<string, string> = {};
+    formData.forEach((value, key) => {
+      allFormData[key] = typeof value === 'string' ? value : 'non-string';
+    });
+
     console.log('🔐 [verifyOtp Route] Request received:', {
       hasEmail: !!email,
+      email: email || 'MISSING',
       hasToken: !!token,
+      token: token ? `${token.substring(0, 2)}****` : 'MISSING',
       tokenLength: token?.length || 0,
       returnUrl,
+      allFormDataKeys: Object.keys(allFormData),
+      allFormDataValues: Object.keys(allFormData).reduce((acc, key) => {
+        const val = allFormData[key];
+        acc[key] = key === 'token' ? `${val.substring(0, 2)}****` : val;
+        return acc;
+      }, {} as Record<string, string>),
       timestamp: new Date().toISOString(),
     });
 
@@ -113,25 +128,102 @@ export async function POST(request: NextRequest) {
     console.log('🔐 [verifyOtp Route] Starting OTP verification:', {
       email: email.trim().toLowerCase(),
       tokenLength: token.trim().length,
+      tokenPrefix: token?.substring(0, 2) + '****',
       returnUrl,
+      supabaseUrl: supabaseUrl.substring(0, 50) + '...',
       timestamp: new Date().toISOString(),
     });
 
-    const { data, error } = await supabase.auth.verifyOtp({
-      email: email.trim().toLowerCase(),
-      token: token.trim(),
-      type: 'magiclink',
+    // Use 'email' type for 6-digit OTP codes
+    // 'magiclink' is for link-based verification, not OTP codes
+    // IMPORTANT: The type must match what was used when sending the OTP
+    // If signInWithOtp was called without shouldSendOtpCode, it sends a magic link
+    // If shouldSendOtpCode is true, it sends a 6-digit code and type should be 'email'
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedToken = token.trim();
+    
+    console.log('🔐 [verifyOtp Route] Calling supabase.auth.verifyOtp with type=email...', {
+      email: normalizedEmail,
+      tokenLength: normalizedToken.length,
+      tokenPrefix: normalizedToken.substring(0, 2) + '****',
+      type: 'email',
+      supabaseUrl: supabaseUrl.substring(0, 50) + '...',
+      timestamp: new Date().toISOString(),
     });
+
+    // Try 'email' type first (for 6-digit OTP codes)
+    // If that fails with specific error, we might need to try 'magiclink' type
+    // But typically 'email' is correct for OTP codes sent via signInWithOtp
+    let verifyResult = await supabase.auth.verifyOtp({
+      email: normalizedEmail,
+      token: normalizedToken,
+      type: 'email', // Changed from 'magiclink' to 'email' for 6-digit OTP codes
+    });
+    
+    // If 'email' type fails with "invalid" error, log but don't retry with 'magiclink'
+    // because if user received a 6-digit code, it must be 'email' type
+    // The error is likely due to expired/invalid code, not wrong type
+    console.log('🔐 [verifyOtp Route] verifyOtp response received:', {
+      hasData: !!verifyResult.data,
+      hasError: !!verifyResult.error,
+      errorMessage: verifyResult.error?.message,
+      errorCode: verifyResult.error?.code,
+      errorStatus: verifyResult.error?.status,
+      userId: verifyResult.data?.user?.id,
+      hasSession: !!verifyResult.data?.session,
+      typeUsed: 'email',
+      timestamp: new Date().toISOString(),
+    });
+    
+    const { data, error } = verifyResult;
 
     if (error) {
       console.error('❌ [verifyOtp Route] OTP verification failed:', {
         error: error.message,
         errorCode: error.code,
-        email: email.trim().toLowerCase(),
+        errorStatus: error.status,
+        email: normalizedEmail,
+        tokenLength: normalizedToken.length,
+        tokenPrefix: normalizedToken.substring(0, 2) + '****',
+        type: 'email',
+        supabaseUrl: supabaseUrl.substring(0, 50) + '...',
         timestamp: new Date().toISOString(),
       });
+      
+      // Check if error is due to expired token
+      const isExpired = error.message?.toLowerCase().includes('expired') || 
+                       error.code === 'expired_token' ||
+                       error.code === 'token_expired' ||
+                       error.code === 'otp_expired';
+      
+      // Check if error is due to invalid token
+      const isInvalid = error.message?.toLowerCase().includes('invalid') ||
+                       error.code === 'invalid_token' ||
+                       error.code === 'invalid_grant';
+      
+      console.error('❌ [verifyOtp Route] Error analysis:', {
+        isExpired,
+        isInvalid,
+        errorMessage: error.message,
+        errorCode: error.code,
+        timestamp: new Date().toISOString(),
+      });
+      
+      // Return detailed error information for debugging
+      const errorMessage = error.message || 'Invalid or expired code';
+      console.error('❌ [verifyOtp Route] Returning error response:', {
+        status: 400,
+        message: errorMessage,
+        timestamp: new Date().toISOString(),
+      });
+      
       return NextResponse.json(
-        { message: error.message || 'Invalid or expired code' },
+        { 
+          message: errorMessage,
+          errorCode: error.code,
+          isExpired,
+          isInvalid,
+        },
         { status: 400 }
       );
     }

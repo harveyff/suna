@@ -343,10 +343,28 @@ export async function verifyOtp(prevState: any, formData: FormData) {
     timestamp: new Date().toISOString(),
   });
 
+  // Use 'email' type for 6-digit OTP codes
+  // 'magiclink' is for link-based verification, not OTP codes
+  console.log('🔐 [verifyOtp Server Action] Calling supabase.auth.verifyOtp with type=email...', {
+    email: email.trim().toLowerCase(),
+    tokenLength: token.trim().length,
+    type: 'email',
+    timestamp: new Date().toISOString(),
+  });
+
   const { data, error } = await supabase.auth.verifyOtp({
     email: email.trim().toLowerCase(),
     token: token.trim(),
-    type: 'magiclink',
+    type: 'email', // Changed from 'magiclink' to 'email' for 6-digit OTP codes
+  });
+  
+  console.log('🔐 [verifyOtp Server Action] verifyOtp response received:', {
+    hasData: !!data,
+    hasError: !!error,
+    errorMessage: error?.message,
+    errorCode: error?.code,
+    userId: data?.user?.id,
+    timestamp: new Date().toISOString(),
   });
 
   if (error) {

@@ -340,14 +340,34 @@ function LoginContent() {
       });
       
       if (!response.ok) {
-        const errorData = await response.json();
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (e) {
+          errorData = { message: `HTTP ${response.status}: ${response.statusText}` };
+        }
+        
         console.error('❌ [Auth Page] verifyOtp route handler failed:', {
           status: response.status,
+          statusText: response.statusText,
           error: errorData.message,
+          errorCode: errorData.errorCode,
+          isExpired: errorData.isExpired,
+          isInvalid: errorData.isInvalid,
+          errorData,
           timestamp: new Date().toISOString(),
         });
+        
+        // Show specific error message based on error type
+        let errorMessage = errorData.message || 'Invalid or expired code';
+        if (errorData.isExpired) {
+          errorMessage = 'Verification code has expired. Please request a new code.';
+        } else if (errorData.isInvalid) {
+          errorMessage = 'Invalid verification code. Please check and try again.';
+        }
+        
         toast.error('Verification failed', {
-          description: errorData.message || 'Invalid or expired code',
+          description: errorMessage,
           duration: 5000,
         });
         return {};
