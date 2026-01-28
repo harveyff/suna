@@ -31,7 +31,16 @@ export function BackgroundAALChecker({
   const pathname = usePathname();
   
   // Only run queries if user is authenticated and check is enabled
-  const { data: aalData } = useGetAAL();
+  // Add error handling to prevent crashes during SSR
+  const { data: aalData, error: aalError } = useGetAAL();
+  
+  // Log errors but don't crash the app
+  if (aalError) {
+    console.warn('⚠️ [BackgroundAALChecker] AAL check error (non-blocking):', {
+      error: aalError instanceof Error ? aalError.message : String(aalError),
+      timestamp: new Date().toISOString(),
+    });
+  }
 
   useEffect(() => {
     // Only check if user is authenticated, not loading, and checks are enabled

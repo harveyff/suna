@@ -423,7 +423,9 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
     
-    const response = NextResponse.redirect(redirectUrl);
+    // Use 307 (Temporary Redirect) - this is the standard for POST -> GET redirects
+    // Cookies should be preserved automatically by the browser
+    const response = NextResponse.redirect(redirectUrl, { status: 307 });
     
     // CRITICAL: Copy cookies from cookieMap first (most reliable source)
     // Then also copy from supabaseResponse as backup
@@ -547,6 +549,29 @@ export async function POST(request: NextRequest) {
     const finalCookies = response.cookies.getAll();
     const finalAuthCookies = finalCookies.filter(c => c.name.startsWith('sb-'));
     
+    // CRITICAL: If no auth cookies in final response, return error instead of redirecting
+    // This prevents the 500 error on dashboard and provides better error handling
+    if (finalAuthCookies.length === 0) {
+      console.error('❌ [verifyOtp Route] CRITICAL: No auth cookies in final redirect response!', {
+        cookieMapSize: cookieMap.size,
+        supabaseResponseCookieCount: supabaseResponse.cookies.getAll().length,
+        requestCookieCount: requestCookies.length,
+        hasSession: !!session,
+        sessionUserId: session?.user?.id,
+        timestamp: new Date().toISOString(),
+      });
+      
+      // Return error response instead of redirecting without cookies
+      // This prevents 500 error on dashboard and allows client to handle error gracefully
+      return NextResponse.json(
+        { 
+          message: 'Session created but cookies could not be set. Please try again.',
+          errorCode: 'COOKIE_SET_FAILED',
+        },
+        { status: 500 }
+      );
+    }
+    
     console.log('✅ [verifyOtp Route] ===== Route Handler Success =====', {
       redirectUrl: redirectUrl.toString(),
       totalCookieCount: finalCookies.length,
@@ -556,20 +581,13 @@ export async function POST(request: NextRequest) {
         name: c.name,
         hasValue: !!c.value,
         valueLength: c.value?.length || 0,
+        path: c.path || '/',
+        secure: c.secure || false,
+        sameSite: c.sameSite || 'lax',
       })),
+      redirectStatus: 307,
       timestamp: new Date().toISOString(),
     });
-    
-    // CRITICAL: If no auth cookies in final response, log error but still redirect
-    // (The error will be caught by middleware and user will be redirected to /auth)
-    if (finalAuthCookies.length === 0) {
-      console.error('❌ [verifyOtp Route] CRITICAL: No auth cookies in final redirect response!', {
-        cookieMapSize: cookieMap.size,
-        supabaseResponseCookieCount: supabaseResponse.cookies.getAll().length,
-        requestCookieCount: requestCookies.length,
-        timestamp: new Date().toISOString(),
-      });
-    }
     
     return response;
   } catch (error) {
