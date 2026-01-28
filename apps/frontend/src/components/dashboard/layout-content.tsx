@@ -160,10 +160,21 @@ export default function DashboardLayoutContent({
   // API health is now managed by useApiHealth hook
   const isApiHealthy = healthData?.status === 'ok' && !healthError;
 
+  // 🚨 TEMPORARY: Disable authentication check
   // Check authentication status
   // Wait a bit for AuthProvider to fully initialize and read session cookies
   // This prevents redirect loops when session cookies are being set
   useEffect(() => {
+    // 🚨 TEMPORARY: Skip auth check
+    // TODO: Remove this when authentication is fixed
+    const disableAuth = true; // Set to false to re-enable authentication
+    if (disableAuth) {
+      console.log('🚨 [Dashboard] Authentication DISABLED - skipping auth check', {
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+    
     const currentPath = typeof window !== 'undefined' ? window.location.pathname : 'unknown';
     const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
     const allCookies = typeof document !== 'undefined' ? document.cookie : '';

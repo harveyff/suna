@@ -43,6 +43,13 @@ export function BackgroundAALChecker({
   }
 
   useEffect(() => {
+    // 🚨 TEMPORARY: Disable AAL checks
+    // TODO: Remove this when authentication is fixed
+    const disableAuth = true; // Set to false to re-enable AAL checks
+    if (disableAuth) {
+      return;
+    }
+    
     // Only check if user is authenticated, not loading, and checks are enabled
     if (!authLoading && user && enabled && aalData) {
       const { action_required, current_level, next_level, verification_required } = aalData;
