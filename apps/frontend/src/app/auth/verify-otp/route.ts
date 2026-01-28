@@ -100,6 +100,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Create response object for cookie setting
+    // CRITICAL: We need to track cookies separately because supabaseResponse gets recreated
+    // Store cookies in a Map to ensure we have all of them
+    const cookieMap = new Map<string, { value: string; options?: any }>();
+    
     let supabaseResponse = NextResponse.next({
       request,
     });
@@ -113,13 +117,33 @@ export async function POST(request: NextRequest) {
             return request.cookies.getAll();
           },
           setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+            console.log('🍪 [verifyOtp Route] setAll called:', {
+              cookieCount: cookiesToSet.length,
+              cookieNames: cookiesToSet.map(c => c.name),
+              timestamp: new Date().toISOString(),
+            });
+            
+            // Store cookies in map for later use
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieMap.set(name, { value, options });
+              request.cookies.set(name, value);
+            });
+            
+            // Recreate response with updated cookies
             supabaseResponse = NextResponse.next({
               request,
             });
-            cookiesToSet.forEach(({ name, value, options }) =>
-              supabaseResponse.cookies.set(name, value, options)
-            );
+            
+            // Set cookies in the response
+            cookiesToSet.forEach(({ name, value, options }) => {
+              supabaseResponse.cookies.set(name, value, options || {});
+            });
+            
+            console.log('🍪 [verifyOtp Route] Cookies stored in map:', {
+              cookieCount: cookieMap.size,
+              cookieNames: Array.from(cookieMap.keys()),
+              timestamp: new Date().toISOString(),
+            });
           },
         },
       }
@@ -235,6 +259,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Verify session is set after OTP verification
+    // getSession() will also trigger setAll() to set cookies
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       console.error('❌ [verifyOtp Route] Session not created after verification:', {
@@ -256,6 +281,8 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
 
+    // CRITICAL: After verifyOtp and getSession, Supabase has called setAll() multiple times
+    // Each call recreates supabaseResponse, so we need to get the latest one
     // Verify cookies are set after session creation
     // Check both request.cookies (set by setAll) and supabaseResponse.cookies
     const requestCookies = request.cookies.getAll();
@@ -275,6 +302,19 @@ export async function POST(request: NextRequest) {
       authCookies: authCookies.map(c => ({ name: c.name, hasValue: !!c.value, valueLength: c.value?.length || 0 })),
       timestamp: new Date().toISOString(),
     });
+    
+    // CRITICAL: If no cookies found, this is a problem
+    if (authCookies.length === 0) {
+      console.error('❌ [verifyOtp Route] No auth cookies found after session creation!', {
+        requestCookieCount: requestCookies.length,
+        responseCookieCount: responseCookies.length,
+        timestamp: new Date().toISOString(),
+      });
+      return NextResponse.json(
+        { message: 'Failed to set authentication cookies. Please try again.' },
+        { status: 500 }
+      );
+    }
 
     // Determine if new user (for analytics)
     const isNewUser = data.user && (Date.now() - new Date(data.user.created_at).getTime()) < 60000;
@@ -311,10 +351,12 @@ export async function POST(request: NextRequest) {
     });
 
     // CRITICAL: Create redirect response and ensure cookies are included
-    // The cookies are set by createServerClient via setAll() into supabaseResponse
-    // We must copy them to the redirect response to ensure they persist
+    // Use cookieMap to ensure we have all cookies that were set by Supabase
+    // This is more reliable than relying on supabaseResponse which gets recreated
     console.log('🔄 [verifyOtp Route] Creating redirect response with cookies...', {
       redirectUrl: redirectUrl.toString(),
+      cookieMapSize: cookieMap.size,
+      cookieMapKeys: Array.from(cookieMap.keys()),
       supabaseResponseCookieCount: supabaseResponse.cookies.getAll().length,
       supabaseResponseCookieNames: supabaseResponse.cookies.getAll().map(c => c.name),
       forwardedProto,
@@ -324,48 +366,63 @@ export async function POST(request: NextRequest) {
     
     const response = NextResponse.redirect(redirectUrl);
     
-    // Copy all cookies from supabaseResponse to the redirect response
-    // This ensures cookies are properly set in the redirect response
-    // Without this, cookies may not persist after redirect
-    const supabaseResponseCookies = supabaseResponse.cookies.getAll();
-    console.log('🍪 [verifyOtp Route] Copying cookies to redirect response:', {
-      cookieCount: supabaseResponseCookies.length,
-      cookieNames: supabaseResponseCookies.map(c => c.name),
-      cookieDetails: supabaseResponseCookies.map(c => ({
-        name: c.name,
-        hasValue: !!c.value,
-        valueLength: c.value?.length || 0,
-      })),
-      timestamp: new Date().toISOString(),
-    });
-    
     // Determine if we're in a secure context (HTTPS)
     // Don't force secure=true if we're not in HTTPS (for development/local)
     const isSecure = forwardedProto === 'https' || baseUrl.startsWith('https');
     
+    // CRITICAL: Copy cookies from cookieMap first (most reliable source)
+    // Then also copy from supabaseResponse as backup
+    console.log('🍪 [verifyOtp Route] Copying cookies to redirect response:', {
+      cookieMapSize: cookieMap.size,
+      cookieMapKeys: Array.from(cookieMap.keys()),
+      supabaseResponseCookieCount: supabaseResponse.cookies.getAll().length,
+      timestamp: new Date().toISOString(),
+    });
+    
+    // Copy from cookieMap (most reliable - contains all cookies set by Supabase)
+    cookieMap.forEach((cookieData, name) => {
+      if (name.startsWith('sb-')) {
+        const cookieOptions = cookieData.options || {};
+        response.cookies.set(name, cookieData.value, {
+          path: cookieOptions.path || '/',
+          sameSite: cookieOptions.sameSite || 'lax',
+          secure: cookieOptions.secure !== undefined ? cookieOptions.secure : isSecure,
+          httpOnly: cookieOptions.httpOnly !== undefined ? cookieOptions.httpOnly : true,
+          maxAge: cookieOptions.maxAge,
+        });
+        
+        console.log('🍪 [verifyOtp Route] Cookie set from map:', {
+          name,
+          hasValue: !!cookieData.value,
+          valueLength: cookieData.value?.length || 0,
+          secure: cookieOptions.secure !== undefined ? cookieOptions.secure : isSecure,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+    
+    // Also copy from supabaseResponse as backup (in case cookieMap missed something)
+    const supabaseResponseCookies = supabaseResponse.cookies.getAll();
     supabaseResponseCookies.forEach(cookie => {
-      // Use the same options that Supabase uses, but ensure they're compatible
-      // Don't force secure=true if we're not in HTTPS (for development)
-      response.cookies.set(cookie.name, cookie.value, {
-        path: '/',
-        sameSite: 'lax',
-        secure: isSecure, // Only set secure in HTTPS
-        httpOnly: true,
-      });
-      
-      console.log('🍪 [verifyOtp Route] Cookie set in redirect response:', {
-        name: cookie.name,
-        hasValue: !!cookie.value,
-        valueLength: cookie.value?.length || 0,
-        secure: isSecure,
-        timestamp: new Date().toISOString(),
-      });
+      if (cookie.name.startsWith('sb-') && !cookieMap.has(cookie.name)) {
+        console.log('🍪 [verifyOtp Route] Adding cookie from supabaseResponse (backup):', {
+          name: cookie.name,
+          hasValue: !!cookie.value,
+          timestamp: new Date().toISOString(),
+        });
+        response.cookies.set(cookie.name, cookie.value, {
+          path: '/',
+          sameSite: 'lax',
+          secure: isSecure,
+          httpOnly: true,
+        });
+      }
     });
     
     // Also copy cookies from request.cookies (in case they were set there)
     requestAuthCookies.forEach(cookie => {
       // Only set if not already in response
-      if (!supabaseResponseCookies.find(c => c.name === cookie.name)) {
+      if (!cookieMap.has(cookie.name) && !supabaseResponseCookies.find(c => c.name === cookie.name)) {
         console.log('🍪 [verifyOtp Route] Adding cookie from request:', {
           name: cookie.name,
           hasValue: !!cookie.value,
@@ -387,11 +444,33 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
     
+    // Final verification: Check that cookies are actually in the response
+    const finalCookies = response.cookies.getAll();
+    const finalAuthCookies = finalCookies.filter(c => c.name.startsWith('sb-'));
+    
     console.log('✅ [verifyOtp Route] ===== Route Handler Success =====', {
       redirectUrl: redirectUrl.toString(),
-      cookieCount: response.cookies.getAll().length,
+      totalCookieCount: finalCookies.length,
+      authCookieCount: finalAuthCookies.length,
+      authCookieNames: finalAuthCookies.map(c => c.name),
+      cookieDetails: finalAuthCookies.map(c => ({
+        name: c.name,
+        hasValue: !!c.value,
+        valueLength: c.value?.length || 0,
+      })),
       timestamp: new Date().toISOString(),
     });
+    
+    // CRITICAL: If no auth cookies in final response, log error but still redirect
+    // (The error will be caught by middleware and user will be redirected to /auth)
+    if (finalAuthCookies.length === 0) {
+      console.error('❌ [verifyOtp Route] CRITICAL: No auth cookies in final redirect response!', {
+        cookieMapSize: cookieMap.size,
+        supabaseResponseCookieCount: supabaseResponse.cookies.getAll().length,
+        requestCookieCount: requestCookies.length,
+        timestamp: new Date().toISOString(),
+      });
+    }
     
     return response;
   } catch (error) {

@@ -385,14 +385,22 @@ export async function middleware(request: NextRequest) {
   let authError: Error | null = null;
   
   // Check cookies before fetching user
-  const hasAuthCookie = request.cookies.has('sb-supabase-kong-auth-token') || 
-                        request.cookies.has('sb-2f5c36de-auth-token') ||
-                        request.cookies.has('sb-demo-auth-token');
+  // Check for any Supabase auth cookie (sb-*)
+  const allCookies = request.cookies.getAll();
+  const authCookies = allCookies.filter(c => c.name.startsWith('sb-'));
+  const hasAuthCookie = authCookies.length > 0;
   
   console.log('🔍 [Middleware] Checking authentication:', {
     pathname,
     hasAuthCookie,
-    cookieNames: request.cookies.getAll().map(c => c.name).filter(name => name.startsWith('sb-')),
+    authCookieCount: authCookies.length,
+    cookieNames: authCookies.map(c => c.name),
+    cookieDetails: authCookies.map(c => ({
+      name: c.name,
+      hasValue: !!c.value,
+      valueLength: c.value?.length || 0,
+    })),
+    totalCookieCount: allCookies.length,
     timestamp: new Date().toISOString(),
   });
   

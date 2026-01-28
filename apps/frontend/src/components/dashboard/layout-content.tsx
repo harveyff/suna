@@ -100,6 +100,17 @@ export default function DashboardLayoutContent({
   const params = useParams();
   const threadId = params?.threadId as string | undefined;
   
+  // Global auth flow check: Log auth state for debugging
+  useEffect(() => {
+    console.log('🔍 [DashboardLayout] Auth state check:', {
+      isLoading,
+      hasUser: !!user,
+      userId: user?.id,
+      email: user?.email,
+      timestamp: new Date().toISOString(),
+    });
+  }, [isLoading, user]);
+  
   usePresence(threadId);
   
   const { data: accounts } = useAccounts({ enabled: !!user });
