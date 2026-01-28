@@ -305,18 +305,35 @@ export async function signOut() {
 }
 
 export async function verifyOtp(prevState: any, formData: FormData) {
+  console.log('🔐 [verifyOtp Server Action] Starting OTP verification (fallback method):', {
+    timestamp: new Date().toISOString(),
+    note: 'This is a fallback - Route Handler should be used first',
+  });
+  
   const email = formData.get('email') as string;
   const token = formData.get('token') as string;
   const returnUrl = formData.get('returnUrl') as string | undefined;
 
+  console.log('🔐 [verifyOtp Server Action] Input validation:', {
+    hasEmail: !!email,
+    emailLength: email?.length || 0,
+    hasToken: !!token,
+    tokenLength: token?.length || 0,
+    returnUrl: returnUrl || '/dashboard',
+    timestamp: new Date().toISOString(),
+  });
+
   if (!email || !email.includes('@')) {
+    console.error('❌ [verifyOtp Server Action] Invalid email:', { email, timestamp: new Date().toISOString() });
     return { message: 'Please enter a valid email address' };
   }
 
   if (!token || token.length !== 6) {
+    console.error('❌ [verifyOtp Server Action] Invalid token length:', { tokenLength: token?.length || 0, timestamp: new Date().toISOString() });
     return { message: 'Please enter the 6-digit code from your email' };
   }
 
+  console.log('🔐 [verifyOtp Server Action] Creating Supabase client...', { timestamp: new Date().toISOString() });
   const supabase = await createClient();
 
   console.log('🔐 [verifyOtp] Starting OTP verification:', {

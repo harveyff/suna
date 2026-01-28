@@ -220,8 +220,25 @@ export function useAgentStartInput(options: UseAgentStartInputOptions = {}): Use
     }
     
     // Check auth if required
-    // Only check if AuthProvider has finished loading to avoid false positives
-    if (requireAuth && !isAuthLoading) {
+    // Global auth check: Only check if AuthProvider has finished loading to avoid false positives
+    // This prevents redirect loops in incognito mode
+    if (requireAuth) {
+      console.log(`${logPrefix} Auth check (requireAuth=true):`, {
+        isLoading: isAuthLoading,
+        hasUser: !!user,
+        userId: user?.id,
+        timestamp: new Date().toISOString(),
+      });
+      
+      // Wait for AuthProvider to finish loading before checking auth
+      if (isAuthLoading) {
+        console.log(`${logPrefix} AuthProvider still loading, waiting...`, {
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+      
+      // Check if user is authenticated (must have user.id)
       if (!user || !user.id) {
         console.log(`${logPrefix} Auth required but user not authenticated, calling onAuthRequired:`, {
           hasUser: !!user,
@@ -232,6 +249,11 @@ export function useAgentStartInput(options: UseAgentStartInputOptions = {}): Use
         localStorage.setItem(PENDING_PROMPT_KEY, message.trim());
         onAuthRequired?.(message.trim());
         return;
+      } else {
+        console.log(`${logPrefix} User authenticated, proceeding with agent start:`, {
+          userId: user.id,
+          timestamp: new Date().toISOString(),
+        });
       }
     }
 

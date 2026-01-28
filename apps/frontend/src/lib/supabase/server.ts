@@ -3,6 +3,11 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 export async function createClient() {
+  console.log('🔧 [Supabase Server Client] Creating client instance:', {
+    timestamp: new Date().toISOString(),
+    context: 'Server-side (Server Actions/Server Components)',
+  });
+  
   // Priority for server-side code:
   // 1. SUPABASE_URL (server-side env var, cluster-internal) - highest priority
   // 2. NEXT_PUBLIC_SUPABASE_URL (if not demo/placeholder) - fallback

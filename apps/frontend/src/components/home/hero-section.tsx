@@ -40,13 +40,27 @@ export function HeroSection() {
   
   // Close auth dialog and redirect when user logs in
   // Only redirect if user is actually authenticated (has valid user object)
+  // Global auth check: Prevent redirect loops by checking isLoading and user.id
   useEffect(() => {
+    console.log('🔍 [HeroSection] Auth state check (redirect logic):', {
+      isLoading,
+      hasUser: !!user,
+      userId: user?.id,
+      email: user?.email,
+      authDialogOpen,
+      timestamp: new Date().toISOString(),
+    });
+    
     // Don't redirect while loading - wait for AuthProvider to fully initialize
     if (isLoading) {
+      console.log('⏳ [HeroSection] AuthProvider still loading, skipping redirect check', {
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
     
-    // Only redirect if dialog is open AND user is authenticated
+    // Only redirect if dialog is open AND user is authenticated (has valid user.id)
+    // This prevents redirect loops in incognito mode where user might be null
     if (authDialogOpen && user && user.id) {
       console.log('🔄 [HeroSection] User logged in, closing dialog and redirecting to dashboard:', {
         userId: user.id,
@@ -55,6 +69,12 @@ export function HeroSection() {
       });
       setAuthDialogOpen(false);
       router.push('/dashboard');
+    } else if (authDialogOpen && !user) {
+      console.log('⚠️ [HeroSection] Auth dialog open but user not authenticated, keeping dialog open', {
+        isLoading,
+        hasUser: false,
+        timestamp: new Date().toISOString(),
+      });
     }
   }, [user, isLoading, authDialogOpen, router]);
   

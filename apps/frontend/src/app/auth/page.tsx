@@ -273,7 +273,14 @@ function LoginContent() {
   // The useEffect will redirect if user is already authenticated
 
   // Handle OTP verification
+  // Global auth flow: Route Handler -> Server Action fallback
+  // Route Handler ensures cookies are properly set before redirect
   const handleVerifyOtp = async (prevState: any, formData: FormData) => {
+    console.log('🔐 [Auth Page] ===== OTP Verification Flow Start =====', {
+      timestamp: new Date().toISOString(),
+      flow: 'Route Handler (primary) -> Server Action (fallback)',
+    });
+    
     const email = expiredEmailState || formData.get('email') as string;
     const otpLength = otpCode.length;
     
@@ -283,6 +290,7 @@ function LoginContent() {
       returnUrl: returnUrl || '/dashboard',
       hasExpiredEmail: !!expiredEmailState,
       isPkceExpired,
+      currentPath: typeof window !== 'undefined' ? window.location.pathname : 'unknown',
       timestamp: new Date().toISOString(),
     });
     
@@ -310,10 +318,25 @@ function LoginContent() {
     });
     
     // Use Route Handler instead of Server Action to ensure cookies are properly set
+    // Route Handler uses request.cookies directly, ensuring cookies are set in redirect response
+    console.log('🔄 [Auth Page] Attempting Route Handler (primary method)...', {
+      endpoint: '/auth/verify-otp',
+      method: 'POST',
+      timestamp: new Date().toISOString(),
+    });
+    
     try {
       const response = await fetch('/auth/verify-otp', {
         method: 'POST',
         body: formData,
+      });
+      
+      console.log('📥 [Auth Page] Route Handler response received:', {
+        status: response.status,
+        statusText: response.statusText,
+        hasLocation: !!response.headers.get('Location'),
+        location: response.headers.get('Location'),
+        timestamp: new Date().toISOString(),
       });
       
       if (!response.ok) {
@@ -355,6 +378,9 @@ function LoginContent() {
     }
     
     // Fallback: use server action if route handler fails
+    console.log('⚠️ [Auth Page] Route Handler failed or returned, falling back to Server Action...', {
+      timestamp: new Date().toISOString(),
+    });
     const result = await verifyOtp(prevState, formData);
     
     console.log('📥 [Auth Page] verifyOtp result received:', {

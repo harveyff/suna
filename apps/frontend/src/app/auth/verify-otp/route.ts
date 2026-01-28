@@ -4,10 +4,29 @@ import type { NextRequest } from 'next/server';
 
 /**
  * Route Handler for OTP verification
- * This ensures cookies are properly set before redirect
+ * 
+ * GLOBAL AUTH FLOW SUMMARY:
+ * 1. User enters OTP code on /auth page
+ * 2. Auth Page calls this Route Handler (primary method)
+ * 3. Route Handler verifies OTP with Supabase
+ * 4. Route Handler creates session and sets cookies via request.cookies
+ * 5. Route Handler redirects to /dashboard with cookies in response
+ * 6. Middleware checks cookies and allows access
+ * 7. Dashboard renders with authenticated user
+ * 
+ * FALLBACK: If Route Handler fails, Auth Page falls back to Server Action
+ * 
+ * KEY: Route Handler uses request.cookies directly, ensuring cookies are set
+ * in the redirect response. This is critical for cookie persistence.
  */
 export async function POST(request: NextRequest) {
   try {
+    console.log('🔐 [verifyOtp Route] ===== Route Handler Entry Point =====', {
+      timestamp: new Date().toISOString(),
+      method: 'POST',
+      url: request.url,
+    });
+    
     const formData = await request.formData();
     const email = formData.get('email') as string;
     const token = formData.get('token') as string;
@@ -189,13 +208,27 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
 
-    // Create redirect response using the response object that has cookies set
-    // The cookies should already be set by createServerClient via setAll()
+    // CRITICAL: Create redirect response and ensure cookies are included
+    // The cookies are set by createServerClient via setAll() into supabaseResponse
+    // We must copy them to the redirect response to ensure they persist
+    console.log('🔄 [verifyOtp Route] Creating redirect response with cookies...', {
+      redirectUrl: redirectUrl.toString(),
+      supabaseResponseCookieCount: supabaseResponse.cookies.getAll().length,
+      timestamp: new Date().toISOString(),
+    });
+    
     const response = NextResponse.redirect(redirectUrl);
     
     // Copy all cookies from supabaseResponse to the redirect response
     // This ensures cookies are properly set in the redirect response
+    // Without this, cookies may not persist after redirect
     const supabaseResponseCookies = supabaseResponse.cookies.getAll();
+    console.log('🍪 [verifyOtp Route] Copying cookies to redirect response:', {
+      cookieCount: supabaseResponseCookies.length,
+      cookieNames: supabaseResponseCookies.map(c => c.name),
+      timestamp: new Date().toISOString(),
+    });
+    
     supabaseResponseCookies.forEach(cookie => {
       response.cookies.set(cookie.name, cookie.value, {
         path: '/',
@@ -208,6 +241,12 @@ export async function POST(request: NextRequest) {
     console.log('🍪 [verifyOtp Route] Cookies in redirect response:', {
       totalCookies: response.cookies.getAll().length,
       authCookies: response.cookies.getAll().filter(c => c.name.startsWith('sb-')).map(c => c.name),
+      timestamp: new Date().toISOString(),
+    });
+    
+    console.log('✅ [verifyOtp Route] ===== Route Handler Success =====', {
+      redirectUrl: redirectUrl.toString(),
+      cookieCount: response.cookies.getAll().length,
       timestamp: new Date().toISOString(),
     });
     
