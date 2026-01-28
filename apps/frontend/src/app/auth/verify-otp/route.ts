@@ -193,11 +193,30 @@ export async function POST(request: NextRequest) {
     });
     
     // Try 'magiclink' type first - this is correct for email_otp from generate_link
-    let verifyResult = await supabase.auth.verifyOtp({
-      email: normalizedEmail,
-      token: normalizedToken,
-      type: 'magiclink', // email_otp from generate_link uses type="magiclink"
-    });
+    let verifyResult;
+    try {
+      verifyResult = await supabase.auth.verifyOtp({
+        email: normalizedEmail,
+        token: normalizedToken,
+        type: 'magiclink', // email_otp from generate_link uses type="magiclink"
+      });
+    } catch (verifyError) {
+      console.error('❌ [verifyOtp Route] verifyOtp call threw exception:', {
+        error: verifyError instanceof Error ? verifyError.message : String(verifyError),
+        errorStack: verifyError instanceof Error ? verifyError.stack : undefined,
+        email: normalizedEmail,
+        tokenLength: normalizedToken.length,
+        timestamp: new Date().toISOString(),
+      });
+      return NextResponse.json(
+        { 
+          message: 'Failed to verify OTP code',
+          error: verifyError instanceof Error ? verifyError.message : String(verifyError),
+          errorCode: 'VERIFY_OTP_EXCEPTION',
+        },
+        { status: 500 }
+      );
+    }
     
     // If 'magiclink' type fails with specific error, try 'email' as fallback
     // This handles edge cases where OTP might have been sent via signInWithOtp
@@ -215,11 +234,29 @@ export async function POST(request: NextRequest) {
         timestamp: new Date().toISOString(),
       });
       
-      verifyResult = await supabase.auth.verifyOtp({
-        email: normalizedEmail,
-        token: normalizedToken,
-        type: 'email', // Fallback to email type
-      });
+      try {
+        verifyResult = await supabase.auth.verifyOtp({
+          email: normalizedEmail,
+          token: normalizedToken,
+          type: 'email', // Fallback to email type
+        });
+      } catch (verifyError) {
+        console.error('❌ [verifyOtp Route] verifyOtp (email fallback) call threw exception:', {
+          error: verifyError instanceof Error ? verifyError.message : String(verifyError),
+          errorStack: verifyError instanceof Error ? verifyError.stack : undefined,
+          email: normalizedEmail,
+          tokenLength: normalizedToken.length,
+          timestamp: new Date().toISOString(),
+        });
+        return NextResponse.json(
+          { 
+            message: 'Failed to verify OTP code',
+            error: verifyError instanceof Error ? verifyError.message : String(verifyError),
+            errorCode: 'VERIFY_OTP_EXCEPTION',
+          },
+          { status: 500 }
+        );
+      }
     } else if (verifyResult.error) {
       console.log('⏭️ [verifyOtp Route] Skipping email type retry - token is expired or invalid:', {
         errorMessage: verifyResult.error?.message,
@@ -315,8 +352,31 @@ export async function POST(request: NextRequest) {
         timestamp: new Date().toISOString(),
       });
       
-      const { data: { session: fetchedSession } } = await supabase.auth.getSession();
-      session = fetchedSession;
+      try {
+        const { data: { session: fetchedSession }, error: getSessionError } = await supabase.auth.getSession();
+        if (getSessionError) {
+          console.error('❌ [verifyOtp Route] getSession() returned error:', {
+            error: getSessionError.message,
+            errorCode: getSessionError.code,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        session = fetchedSession;
+      } catch (getSessionException) {
+        console.error('❌ [verifyOtp Route] getSession() threw exception:', {
+          error: getSessionException instanceof Error ? getSessionException.message : String(getSessionException),
+          errorStack: getSessionException instanceof Error ? getSessionException.stack : undefined,
+          timestamp: new Date().toISOString(),
+        });
+        return NextResponse.json(
+          { 
+            message: 'Failed to retrieve session after verification',
+            error: getSessionException instanceof Error ? getSessionException.message : String(getSessionException),
+            errorCode: 'GET_SESSION_EXCEPTION',
+          },
+          { status: 500 }
+        );
+      }
     }
     
     if (!session) {
@@ -340,27 +400,37 @@ export async function POST(request: NextRequest) {
         timestamp: new Date().toISOString(),
       });
       
-      const { data: sessionData, error: setSessionError } = await supabase.auth.setSession({
-        access_token: session.access_token,
-        refresh_token: session.refresh_token,
-      });
-      
-      if (setSessionError) {
-        console.error('❌ [verifyOtp Route] Failed to set session:', {
-          error: setSessionError.message,
-          timestamp: new Date().toISOString(),
+      try {
+        const { data: sessionData, error: setSessionError } = await supabase.auth.setSession({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
         });
-        // Don't fail - session might already be set
-      } else {
-        console.log('✅ [verifyOtp Route] Session set explicitly:', {
-          userId: sessionData.session?.user.id,
-          email: sessionData.session?.user.email,
-          timestamp: new Date().toISOString(),
-        });
-        // Update session reference to the one returned by setSession
-        if (sessionData.session) {
-          session = sessionData.session;
+        
+        if (setSessionError) {
+          console.error('❌ [verifyOtp Route] Failed to set session:', {
+            error: setSessionError.message,
+            errorCode: setSessionError.code,
+            timestamp: new Date().toISOString(),
+          });
+          // Don't fail - session might already be set
+        } else {
+          console.log('✅ [verifyOtp Route] Session set explicitly:', {
+            userId: sessionData.session?.user.id,
+            email: sessionData.session?.user.email,
+            timestamp: new Date().toISOString(),
+          });
+          // Update session reference to the one returned by setSession
+          if (sessionData.session) {
+            session = sessionData.session;
+          }
         }
+      } catch (setSessionException) {
+        console.error('❌ [verifyOtp Route] setSession() threw exception:', {
+          error: setSessionException instanceof Error ? setSessionException.message : String(setSessionException),
+          errorStack: setSessionException instanceof Error ? setSessionException.stack : undefined,
+          timestamp: new Date().toISOString(),
+        });
+        // Don't fail - session might already be set, continue with redirect
       }
     }
 
@@ -412,32 +482,52 @@ export async function POST(request: NextRequest) {
     const authEvent = isNewUser ? 'signup' : 'login';
 
     // Calculate base URL for redirect
-    const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('X-Forwarded-Host');
-    const forwardedProto = request.headers.get('x-forwarded-proto') || request.headers.get('X-Forwarded-Proto') || 'https';
-    const host = request.headers.get('host') || request.headers.get('Host');
-    
     let baseUrl: string;
-    if (forwardedHost) {
-      const protocol = forwardedProto || 'https';
-      baseUrl = `${protocol}://${forwardedHost}`;
-    } else if (host && !host.includes('0.0.0.0') && !host.includes('127.0.0.1')) {
-      const protocol = forwardedProto || 'https';
-      baseUrl = `${protocol}://${host}`;
-    } else {
-      baseUrl = request.nextUrl.origin;
+    let redirectUrlObj: URL;
+    let isSecure: boolean;
+    
+    try {
+      const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('X-Forwarded-Host');
+      const forwardedProto = request.headers.get('x-forwarded-proto') || request.headers.get('X-Forwarded-Proto') || 'https';
+      const host = request.headers.get('host') || request.headers.get('Host');
+      
+      if (forwardedHost) {
+        const protocol = forwardedProto || 'https';
+        baseUrl = `${protocol}://${forwardedHost}`;
+      } else if (host && !host.includes('0.0.0.0') && !host.includes('127.0.0.1')) {
+        const protocol = forwardedProto || 'https';
+        baseUrl = `${protocol}://${host}`;
+      } else {
+        baseUrl = request.nextUrl.origin;
+      }
+
+      // Determine if we're in a secure context (HTTPS)
+      // Don't force secure=true if we're not in HTTPS (for development/local)
+      isSecure = forwardedProto === 'https' || baseUrl.startsWith('https');
+
+      // CRITICAL FIX: Use calculated baseUrl instead of request.nextUrl.origin
+      // request.nextUrl.origin may return https://0.0.0.0:3000 which is invalid for external access
+      // baseUrl is calculated from forwarded headers and is the correct external URL
+      const redirectPath = returnUrl.startsWith('/') ? returnUrl : `/${returnUrl}`;
+      redirectUrlObj = new URL(redirectPath, baseUrl);
+      redirectUrlObj.searchParams.set('auth_event', authEvent);
+      redirectUrlObj.searchParams.set('auth_method', 'email_otp');
+    } catch (urlError) {
+      console.error('❌ [verifyOtp Route] Failed to build redirect URL:', {
+        error: urlError instanceof Error ? urlError.message : String(urlError),
+        errorStack: urlError instanceof Error ? urlError.stack : undefined,
+        returnUrl,
+        timestamp: new Date().toISOString(),
+      });
+      return NextResponse.json(
+        { 
+          message: 'Failed to build redirect URL',
+          error: urlError instanceof Error ? urlError.message : String(urlError),
+          errorCode: 'URL_BUILD_FAILED',
+        },
+        { status: 500 }
+      );
     }
-
-    // Determine if we're in a secure context (HTTPS)
-    // Don't force secure=true if we're not in HTTPS (for development/local)
-    const isSecure = forwardedProto === 'https' || baseUrl.startsWith('https');
-
-    // CRITICAL FIX: Use calculated baseUrl instead of request.nextUrl.origin
-    // request.nextUrl.origin may return https://0.0.0.0:3000 which is invalid for external access
-    // baseUrl is calculated from forwarded headers and is the correct external URL
-    const redirectPath = returnUrl.startsWith('/') ? returnUrl : `/${returnUrl}`;
-    const redirectUrlObj = new URL(redirectPath, baseUrl);
-    redirectUrlObj.searchParams.set('auth_event', authEvent);
-    redirectUrlObj.searchParams.set('auth_method', 'email_otp');
     
     console.log('🔄 [verifyOtp Route] Redirecting after successful verification:', {
       redirectPath: redirectUrlObj.pathname + redirectUrlObj.search,
@@ -467,7 +557,25 @@ export async function POST(request: NextRequest) {
     // CRITICAL FIX: Create redirect response, then copy cookies from supabaseResponse
     // supabaseResponse is the authoritative source managed by Supabase SSR
     // According to Supabase SSR docs, cookies set via setAll() are stored in the response
-    const response = NextResponse.redirect(redirectUrlObj, { status: 307 });
+    let response: NextResponse;
+    try {
+      response = NextResponse.redirect(redirectUrlObj, { status: 307 });
+    } catch (redirectError) {
+      console.error('❌ [verifyOtp Route] Failed to create redirect response:', {
+        error: redirectError instanceof Error ? redirectError.message : String(redirectError),
+        errorStack: redirectError instanceof Error ? redirectError.stack : undefined,
+        redirectUrl: redirectUrlObj.toString(),
+        timestamp: new Date().toISOString(),
+      });
+      return NextResponse.json(
+        { 
+          message: 'Failed to create redirect response',
+          error: redirectError instanceof Error ? redirectError.message : String(redirectError),
+          errorCode: 'REDIRECT_CREATION_FAILED',
+        },
+        { status: 500 }
+      );
+    }
     
     // Copy ALL cookies from supabaseResponse to the redirect response
     const supabaseCookies = supabaseResponse.cookies.getAll();
@@ -477,23 +585,42 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
     
-    supabaseCookies.forEach(cookie => {
-      // Calculate maxAge from session if cookie doesn't have it
-      let maxAge = cookie.maxAge;
-      if (!maxAge && session?.expires_at) {
-        const expiresAtSeconds = session.expires_at;
-        const nowSeconds = Math.floor(Date.now() / 1000);
-        maxAge = Math.max(expiresAtSeconds - nowSeconds, 3600); // At least 1 hour
-      }
-      
-      response.cookies.set(cookie.name, cookie.value, {
-        path: cookie.path || '/',
-        sameSite: (cookie.sameSite as 'lax' | 'strict' | 'none') || 'lax',
-        secure: cookie.secure !== undefined ? cookie.secure : isSecure,
-        httpOnly: cookie.httpOnly !== undefined ? cookie.httpOnly : true,
-        maxAge: maxAge || cookie.maxAge || 3600 * 24 * 7, // Default 7 days
+    try {
+      supabaseCookies.forEach(cookie => {
+        // Calculate maxAge from session if cookie doesn't have it
+        let maxAge = cookie.maxAge;
+        if (!maxAge && session?.expires_at) {
+          const expiresAtSeconds = session.expires_at;
+          const nowSeconds = Math.floor(Date.now() / 1000);
+          maxAge = Math.max(expiresAtSeconds - nowSeconds, 3600); // At least 1 hour
+        }
+        
+        try {
+          response.cookies.set(cookie.name, cookie.value, {
+            path: cookie.path || '/',
+            sameSite: (cookie.sameSite as 'lax' | 'strict' | 'none') || 'lax',
+            secure: cookie.secure !== undefined ? cookie.secure : isSecure,
+            httpOnly: cookie.httpOnly !== undefined ? cookie.httpOnly : true,
+            maxAge: maxAge || cookie.maxAge || 3600 * 24 * 7, // Default 7 days
+          });
+        } catch (cookieSetError) {
+          console.error('❌ [verifyOtp Route] Failed to set cookie:', {
+            cookieName: cookie.name,
+            error: cookieSetError instanceof Error ? cookieSetError.message : String(cookieSetError),
+            timestamp: new Date().toISOString(),
+          });
+          // Continue with other cookies
+        }
       });
-    });
+    } catch (cookieError) {
+      console.error('❌ [verifyOtp Route] Failed to copy cookies:', {
+        error: cookieError instanceof Error ? cookieError.message : String(cookieError),
+        errorStack: cookieError instanceof Error ? cookieError.stack : undefined,
+        cookieCount: supabaseCookies.length,
+        timestamp: new Date().toISOString(),
+      });
+      // Continue anyway - some cookies might have been set
+    }
     
     console.log('🍪 [verifyOtp Route] Final cookies in redirect response:', {
       totalCookies: response.cookies.getAll().length,
