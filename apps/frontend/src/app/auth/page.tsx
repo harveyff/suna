@@ -139,17 +139,36 @@ function LoginContent() {
   }, [isSuccessMessage]);
 
   useEffect(() => {
+    console.log('🔍 [Auth Page] Processing expired/PKCE expired state:', {
+      isExpired,
+      isPkceExpired,
+      expiredEmail,
+      currentLinkExpired: linkExpired,
+      currentExpiredEmailState: expiredEmailState,
+      timestamp: new Date().toISOString(),
+    });
+    
     // Only set linkExpired if it's a real expired link, not PKCE flow state loss
     if (isExpired && !isPkceExpired) {
       setLinkExpired(true);
       if (expiredEmail) {
         setExpiredEmailState(expiredEmail);
       }
+      console.log('✅ [Auth Page] Set linkExpired=true (real expired link)');
     } else if (isPkceExpired && expiredEmail) {
-      // PKCE expired: Set email but don't show "link expired" message
-      // Instead, trigger auto-send of OTP code
+      // PKCE expired: Set email and trigger auto-send of OTP code
+      // Note: We don't set linkExpired=true, but the render logic will check isPkceExpired
+      // to show OTP input view
       setExpiredEmailState(expiredEmail);
-      setLinkExpired(false); // Don't show expired link view
+      setLinkExpired(false); // Don't show "link expired" message, but will show OTP input
+      
+      console.log('🔄 [Auth Page] PKCE expired detected, setting up OTP input:', {
+        email: expiredEmail,
+        isPkceExpired,
+        linkExpired: false,
+        willShowOtpInput: true,
+        timestamp: new Date().toISOString(),
+      });
     }
   }, [isExpired, isPkceExpired, expiredEmail]);
 
@@ -508,8 +527,22 @@ function LoginContent() {
     }
   };
 
-  // Expired link view
-  if (linkExpired) {
+  // Expired link view OR PKCE expired view (both show OTP input)
+  // CRITICAL: When pkce_expired=true, we should also show OTP input even if linkExpired is false
+  const shouldShowOtpInput = linkExpired || (isPkceExpired && expiredEmailState);
+  
+  console.log('🔍 [Auth Page] Render decision:', {
+    linkExpired,
+    isPkceExpired,
+    expiredEmailState,
+    shouldShowOtpInput,
+    autoSendingCode,
+    newCodeSent,
+    autoSendError,
+    timestamp: new Date().toISOString(),
+  });
+  
+  if (shouldShowOtpInput) {
     const emailForProvider = expiredEmailState || resendEmail;
     const provider = emailForProvider ? getEmailProviderInfo(emailForProvider) : null;
 
