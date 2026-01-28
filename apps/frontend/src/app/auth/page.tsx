@@ -253,7 +253,27 @@ function LoginContent() {
 
       try {
         // Call backend API to send OTP-only email
+        // backendApi uses API_URL from api-client.ts which has fallback
+        const apiUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://staging-api.kortix.com/v1';
+        const fullUrl = `${apiUrl}/auth/send-otp`;
+        
+        console.log('🔄 [Auth Page] Calling send-otp API:', {
+          apiUrl,
+          fullUrl,
+          email: emailToUse,
+          backendApiUrl: typeof window !== 'undefined' ? (window as any).__API_URL__ || 'N/A' : 'N/A',
+          timestamp: new Date().toISOString(),
+        });
+        
         const response = await backendApi.post('/auth/send-otp', { email: emailToUse });
+        
+        console.log('📡 [Auth Page] send-otp API response:', {
+          success: response.success,
+          hasError: !!response.error,
+          errorMessage: response.error?.message,
+          errorStatus: response.error?.status,
+          timestamp: new Date().toISOString(),
+        });
 
         if (response.success) {
           setNewCodeSent(true);
@@ -646,8 +666,9 @@ function LoginContent() {
                   </p>
                 </div>
               </div>
-            ) : newCodeSent ? (
-              // Success: New code sent, show OTP input
+            ) : newCodeSent || (shouldShowOtpInput && expiredEmailState) ? (
+              // Success: New code sent OR should show OTP input (even if auto-send failed)
+              // Show OTP input if we have email and shouldShowOtpInput is true
               <div className="flex flex-col items-center gap-6 w-full animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <KortixLogo size={32} />
 
@@ -661,14 +682,26 @@ function LoginContent() {
 
                 <div className="text-center space-y-2">
                   <h1 className="text-[28px] sm:text-[32px] font-normal tracking-tight text-foreground leading-none">
-                    Check your email
+                    {newCodeSent ? 'Check your email' : (isPkceExpired ? 'Enter verification code' : 'Check your email')}
                   </h1>
                   <p className="text-[15px] text-foreground/50">
-                    We sent a 6-digit code to
+                    {newCodeSent 
+                      ? 'We sent a 6-digit code to'
+                      : (isPkceExpired 
+                        ? 'Please enter the 6-digit code sent to your email.'
+                        : 'We sent a 6-digit code to')
+                    }
                   </p>
-                  <p className="text-[15px] font-medium text-foreground">
-                    {expiredEmailState || resendEmail}
-                  </p>
+                  {newCodeSent && (
+                    <p className="text-[15px] font-medium text-foreground">
+                      {expiredEmailState || resendEmail}
+                    </p>
+                  )}
+                  {!newCodeSent && expiredEmailState && (
+                    <p className="text-[15px] font-medium text-foreground">
+                      {expiredEmailState}
+                    </p>
+                  )}
                 </div>
 
                 {/* Segmented OTP Input */}

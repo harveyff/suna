@@ -2,7 +2,18 @@ import { createClient } from '@/lib/supabase/client';
 import { handleApiError, handleNetworkError, ErrorContext, ApiError } from './error-handler';
 import { parseTierRestrictionError, RequestTooLargeError } from './api/errors';
 
-const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL || '';
+// CRITICAL: Ensure API_URL is always set
+// Fallback to staging API if not explicitly configured
+const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://staging-api.kortix.com/v1';
+
+// Log API URL configuration for debugging (only in development)
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+  console.log('🔧 [API Client] API_URL configured:', {
+    apiUrl: API_URL,
+    fromEnv: !!process.env.NEXT_PUBLIC_BACKEND_URL,
+    timestamp: new Date().toISOString(),
+  });
+}
 
 export interface ApiClientOptions {
   showErrors?: boolean;
