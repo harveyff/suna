@@ -255,12 +255,29 @@ export async function POST(request: NextRequest) {
     console.log('✅ [verifyOtp Route] OTP verified successfully:', {
       userId: data.user?.id,
       email: data.user?.email,
+      hasSession: !!data.session,
+      sessionExpiresAt: data.session?.expires_at,
       timestamp: new Date().toISOString(),
     });
 
-    // Verify session is set after OTP verification
-    // getSession() will also trigger setAll() to set cookies
-    const { data: { session } } = await supabase.auth.getSession();
+    // CRITICAL: verifyOtp returns session in data.session
+    // Use it directly instead of calling getSession() again
+    // getSession() might not trigger setAll() if session is already set
+    let session = data.session;
+    
+    // If session is not in verifyOtp response, try getSession()
+    // This should trigger setAll() to set cookies
+    if (!session) {
+      console.warn('⚠️ [verifyOtp Route] Session not in verifyOtp response, calling getSession()...', {
+        userId: data.user?.id,
+        email: data.user?.email,
+        timestamp: new Date().toISOString(),
+      });
+      
+      const { data: { session: fetchedSession } } = await supabase.auth.getSession();
+      session = fetchedSession;
+    }
+    
     if (!session) {
       console.error('❌ [verifyOtp Route] Session not created after verification:', {
         userId: data.user?.id,
@@ -271,6 +288,39 @@ export async function POST(request: NextRequest) {
         { message: 'Session not created after verification. Please try again.' },
         { status: 500 }
       );
+    }
+    
+    // CRITICAL: Ensure session is set in Supabase client
+    // This will trigger setAll() to set cookies if not already set
+    if (session.access_token && session.refresh_token) {
+      console.log('🔄 [verifyOtp Route] Setting session explicitly to ensure cookies are set...', {
+        userId: session.user.id,
+        email: session.user.email,
+        timestamp: new Date().toISOString(),
+      });
+      
+      const { data: sessionData, error: setSessionError } = await supabase.auth.setSession({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+      });
+      
+      if (setSessionError) {
+        console.error('❌ [verifyOtp Route] Failed to set session:', {
+          error: setSessionError.message,
+          timestamp: new Date().toISOString(),
+        });
+        // Don't fail - session might already be set
+      } else {
+        console.log('✅ [verifyOtp Route] Session set explicitly:', {
+          userId: sessionData.session?.user.id,
+          email: sessionData.session?.user.email,
+          timestamp: new Date().toISOString(),
+        });
+        // Update session reference to the one returned by setSession
+        if (sessionData.session) {
+          session = sessionData.session;
+        }
+      }
     }
 
     console.log('✅ [verifyOtp Route] Session created successfully:', {
