@@ -257,11 +257,21 @@ export async function POST(request: NextRequest) {
     });
 
     // Verify cookies are set after session creation
-    const allCookies = request.cookies.getAll();
+    // Check both request.cookies (set by setAll) and supabaseResponse.cookies
+    const requestCookies = request.cookies.getAll();
+    const responseCookies = supabaseResponse.cookies.getAll();
+    const allCookies = [...requestCookies, ...responseCookies];
     const authCookies = allCookies.filter(c => c.name.startsWith('sb-'));
     
+    // Store request auth cookies for later use in cookie copying
+    const requestAuthCookies = requestCookies.filter(c => c.name.startsWith('sb-'));
+    
     console.log('🍪 [verifyOtp Route] Cookies after session creation:', {
+      requestCookieCount: requestCookies.length,
+      responseCookieCount: responseCookies.length,
       totalCookies: allCookies.length,
+      requestAuthCookies: requestAuthCookies.map(c => c.name),
+      responseAuthCookies: responseCookies.filter(c => c.name.startsWith('sb-')).map(c => c.name),
       authCookies: authCookies.map(c => ({ name: c.name, hasValue: !!c.value, valueLength: c.value?.length || 0 })),
       timestamp: new Date().toISOString(),
     });
@@ -306,6 +316,9 @@ export async function POST(request: NextRequest) {
     console.log('🔄 [verifyOtp Route] Creating redirect response with cookies...', {
       redirectUrl: redirectUrl.toString(),
       supabaseResponseCookieCount: supabaseResponse.cookies.getAll().length,
+      supabaseResponseCookieNames: supabaseResponse.cookies.getAll().map(c => c.name),
+      forwardedProto,
+      isSecure: forwardedProto === 'https',
       timestamp: new Date().toISOString(),
     });
     
@@ -318,21 +331,59 @@ export async function POST(request: NextRequest) {
     console.log('🍪 [verifyOtp Route] Copying cookies to redirect response:', {
       cookieCount: supabaseResponseCookies.length,
       cookieNames: supabaseResponseCookies.map(c => c.name),
+      cookieDetails: supabaseResponseCookies.map(c => ({
+        name: c.name,
+        hasValue: !!c.value,
+        valueLength: c.value?.length || 0,
+      })),
       timestamp: new Date().toISOString(),
     });
     
+    // Determine if we're in a secure context (HTTPS)
+    // Don't force secure=true if we're not in HTTPS (for development/local)
+    const isSecure = forwardedProto === 'https' || baseUrl.startsWith('https');
+    
     supabaseResponseCookies.forEach(cookie => {
+      // Use the same options that Supabase uses, but ensure they're compatible
+      // Don't force secure=true if we're not in HTTPS (for development)
       response.cookies.set(cookie.name, cookie.value, {
         path: '/',
         sameSite: 'lax',
-        secure: true,
+        secure: isSecure, // Only set secure in HTTPS
         httpOnly: true,
+      });
+      
+      console.log('🍪 [verifyOtp Route] Cookie set in redirect response:', {
+        name: cookie.name,
+        hasValue: !!cookie.value,
+        valueLength: cookie.value?.length || 0,
+        secure: isSecure,
+        timestamp: new Date().toISOString(),
       });
     });
     
-    console.log('🍪 [verifyOtp Route] Cookies in redirect response:', {
+    // Also copy cookies from request.cookies (in case they were set there)
+    requestAuthCookies.forEach(cookie => {
+      // Only set if not already in response
+      if (!supabaseResponseCookies.find(c => c.name === cookie.name)) {
+        console.log('🍪 [verifyOtp Route] Adding cookie from request:', {
+          name: cookie.name,
+          hasValue: !!cookie.value,
+          timestamp: new Date().toISOString(),
+        });
+        response.cookies.set(cookie.name, cookie.value, {
+          path: '/',
+          sameSite: 'lax',
+          secure: isSecure,
+          httpOnly: true,
+        });
+      }
+    });
+    
+    console.log('🍪 [verifyOtp Route] Final cookies in redirect response:', {
       totalCookies: response.cookies.getAll().length,
       authCookies: response.cookies.getAll().filter(c => c.name.startsWith('sb-')).map(c => c.name),
+      allCookieNames: response.cookies.getAll().map(c => c.name),
       timestamp: new Date().toISOString(),
     });
     
