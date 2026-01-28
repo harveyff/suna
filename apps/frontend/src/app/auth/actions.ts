@@ -356,36 +356,35 @@ export async function verifyOtp(prevState: any, formData: FormData) {
     timestamp: new Date().toISOString(),
   });
 
-  // CRITICAL: Backend uses generate_link with type="magiclink" and extracts email_otp
-  // The email_otp from generate_link is part of the magiclink flow, so it should be verified with type="magiclink"
-  // NOT type="email" - email type is for signInWithOtp with shouldSendOtpCode=true
-  // Since backend uses generate_link (magiclink flow), try 'magiclink' type first
-  console.log('🔐 [verifyOtp Server Action] Calling supabase.auth.verifyOtp with type=magiclink (primary)...', {
+  // IMPORTANT: According to Supabase docs, generate_link returns email_otp which should be verified with type="email"
+  // NOT type="magiclink" - magiclink type is for verifying the actual magic link URL, not the OTP code
+  // The email_otp from generate_link is a 6-digit code that uses the same verification flow as signInWithOtp with shouldSendOtpCode=true
+  console.log('🔐 [verifyOtp Server Action] Calling supabase.auth.verifyOtp with type=email (primary - correct for email_otp)...', {
     email: normalizedEmail,
     tokenLength: normalizedToken.length,
-    type: 'magiclink',
-    reason: 'Backend uses generate_link with type="magiclink" - email_otp is part of magiclink flow',
+    type: 'email',
+    reason: 'Backend extracts email_otp from generate_link - email_otp uses type="email" (not magiclink)',
     timestamp: new Date().toISOString(),
   });
 
-  // Try 'magiclink' type first - this is correct for email_otp from generate_link
+  // Try 'email' type first - this is correct for email_otp from generate_link
   let verifyResult = await supabase.auth.verifyOtp({
     email: normalizedEmail,
     token: normalizedToken,
-    type: 'magiclink', // email_otp from generate_link uses type="magiclink"
+    type: 'email', // email_otp from generate_link uses type="email"
   });
   
-  // If 'magiclink' type fails with specific error, try 'email' as fallback
-  // This handles edge cases where OTP might have been sent via signInWithOtp
-  const shouldRetryWithEmail = verifyResult.error && 
+  // If 'email' type fails with specific error, try 'magiclink' as fallback
+  // This handles edge cases where the token might be a magic link token instead
+  const shouldRetryWithMagiclink = verifyResult.error && 
     verifyResult.error.code !== 'otp_expired' &&
     verifyResult.error.code !== 'expired_token' &&
     verifyResult.error.code !== 'token_expired' &&
     verifyResult.error.code !== 'invalid_token' &&
     verifyResult.error.code !== 'invalid_grant';
   
-  if (shouldRetryWithEmail) {
-    console.log('🔄 [verifyOtp Server Action] magiclink type failed with retryable error, trying email type...', {
+  if (shouldRetryWithMagiclink) {
+    console.log('🔄 [verifyOtp Server Action] email type failed with retryable error, trying magiclink type...', {
       errorMessage: verifyResult.error?.message,
       errorCode: verifyResult.error?.code,
       timestamp: new Date().toISOString(),
@@ -394,10 +393,10 @@ export async function verifyOtp(prevState: any, formData: FormData) {
     verifyResult = await supabase.auth.verifyOtp({
       email: normalizedEmail,
       token: normalizedToken,
-      type: 'email', // Fallback to email type
+      type: 'magiclink', // Fallback to magiclink type
     });
   } else if (verifyResult.error) {
-    console.log('⏭️ [verifyOtp Server Action] Skipping email type retry - token is expired or invalid:', {
+    console.log('⏭️ [verifyOtp Server Action] Skipping magiclink type retry - token is expired or invalid:', {
       errorMessage: verifyResult.error?.message,
       errorCode: verifyResult.error?.code,
       timestamp: new Date().toISOString(),
@@ -413,7 +412,7 @@ export async function verifyOtp(prevState: any, formData: FormData) {
     errorCode: error?.code,
     userId: data?.user?.id,
     hasSession: !!data?.session,
-    typeUsed: error ? 'magiclink -> email (fallback)' : 'magiclink',
+    typeUsed: error ? 'email -> magiclink (fallback)' : 'email',
     timestamp: new Date().toISOString(),
   });
 

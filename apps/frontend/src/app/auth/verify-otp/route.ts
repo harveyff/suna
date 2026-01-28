@@ -28,10 +28,31 @@ export async function POST(request: NextRequest) {
     });
     
     // Parse form data from request
-    const formData = await request.formData();
-    const email = formData.get('email') as string;
-    const token = formData.get('token') as string;
-    const returnUrl = (formData.get('returnUrl') as string) || '/dashboard';
+    let formData: FormData;
+    let email: string;
+    let token: string;
+    let returnUrl: string;
+    
+    try {
+      formData = await request.formData();
+      email = formData.get('email') as string;
+      token = formData.get('token') as string;
+      returnUrl = (formData.get('returnUrl') as string) || '/dashboard';
+    } catch (formDataError) {
+      console.error('❌ [verifyOtp Route] Failed to parse form data:', {
+        error: formDataError instanceof Error ? formDataError.message : String(formDataError),
+        errorStack: formDataError instanceof Error ? formDataError.stack : undefined,
+        timestamp: new Date().toISOString(),
+      });
+      return NextResponse.json(
+        { 
+          message: 'Failed to parse request data',
+          error: formDataError instanceof Error ? formDataError.message : String(formDataError),
+          errorCode: 'FORM_DATA_PARSE_ERROR',
+        },
+        { status: 400 }
+      );
+    }
 
     // Log all form data entries for debugging
     const allFormData: Record<string, string> = {};
@@ -62,15 +83,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // CRITICAL: Log original token BEFORE normalization for debugging
+    console.log('🔍 [verifyOtp Route] Original token received:', {
+      originalToken: token || 'MISSING',
+      originalTokenLength: token?.length || 0,
+      originalTokenType: typeof token,
+      originalTokenFirstChars: token ? token.substring(0, Math.min(10, token.length)) : 'MISSING',
+      originalTokenLastChars: token && token.length > 10 ? token.substring(token.length - 10) : 'MISSING',
+      hasNonDigits: token ? /\D/.test(token) : false,
+      timestamp: new Date().toISOString(),
+    });
+    
     // Normalize token: remove all non-digit characters and trim whitespace
     // This handles cases where users might paste codes with spaces, dashes, etc.
     const normalizedTokenInput = token.replace(/\D/g, '').trim();
     
+    console.log('🔍 [verifyOtp Route] Token normalization result:', {
+      originalToken: token || 'MISSING',
+      normalizedToken: normalizedTokenInput || 'MISSING',
+      normalizedLength: normalizedTokenInput?.length || 0,
+      removedChars: token ? token.length - normalizedTokenInput.length : 0,
+      timestamp: new Date().toISOString(),
+    });
+    
     if (!normalizedTokenInput || normalizedTokenInput.length !== 6) {
       console.error('❌ [verifyOtp Route] Invalid token format:', {
-        originalToken: token ? `${token.substring(0, 2)}****` : 'MISSING',
+        originalToken: token || 'MISSING',
         originalLength: token?.length || 0,
-        normalizedToken: normalizedTokenInput ? `${normalizedTokenInput.substring(0, 2)}****` : 'MISSING',
+        normalizedToken: normalizedTokenInput || 'MISSING',
         normalizedLength: normalizedTokenInput?.length || 0,
         timestamp: new Date().toISOString(),
       });
@@ -178,27 +218,47 @@ export async function POST(request: NextRequest) {
     // Use the already normalized token from validation above
     const normalizedToken = normalizedTokenInput;
     
-    // CRITICAL: Backend uses generate_link with type="magiclink" and extracts email_otp
-    // The email_otp from generate_link is part of the magiclink flow, so it should be verified with type="magiclink"
-    // NOT type="email" - email type is for signInWithOtp with shouldSendOtpCode=true
-    // Since backend uses generate_link (magiclink flow), try 'magiclink' type first
-    console.log('🔐 [verifyOtp Route] Calling supabase.auth.verifyOtp with type=magiclink (primary)...', {
+    // CRITICAL DEBUGGING: Log exact values being sent to Supabase
+    console.log('🔍 [verifyOtp Route] ===== EXACT VALUES BEING SENT TO SUPABASE =====', {
       email: normalizedEmail,
+      token: normalizedToken, // Log full token for debugging (will be masked in production)
       tokenLength: normalizedToken.length,
-      tokenPrefix: normalizedToken.substring(0, 2) + '****',
-      type: 'magiclink',
-      reason: 'Backend uses generate_link with type="magiclink" - email_otp is part of magiclink flow',
+      tokenIsNumeric: /^\d+$/.test(normalizedToken),
       supabaseUrl: supabaseUrl.substring(0, 50) + '...',
       timestamp: new Date().toISOString(),
     });
     
-    // Try 'magiclink' type first - this is correct for email_otp from generate_link
+    // IMPORTANT: According to Supabase docs, generate_link returns email_otp which should be verified with type="email"
+    // NOT type="magiclink" - magiclink type is for verifying the actual magic link URL, not the OTP code
+    // The email_otp from generate_link is a 6-digit code that uses the same verification flow as signInWithOtp with shouldSendOtpCode=true
+    console.log('🔐 [verifyOtp Route] Calling supabase.auth.verifyOtp with type=email (primary - correct for email_otp)...', {
+      email: normalizedEmail,
+      tokenLength: normalizedToken.length,
+      tokenPrefix: normalizedToken.substring(0, 2) + '****',
+      type: 'email',
+      reason: 'Backend extracts email_otp from generate_link - email_otp uses type="email" (not magiclink)',
+      supabaseUrl: supabaseUrl.substring(0, 50) + '...',
+      timestamp: new Date().toISOString(),
+    });
+    
+    // Try 'email' type first - this is correct for email_otp from generate_link
     let verifyResult;
     try {
       verifyResult = await supabase.auth.verifyOtp({
         email: normalizedEmail,
         token: normalizedToken,
-        type: 'magiclink', // email_otp from generate_link uses type="magiclink"
+        type: 'email', // email_otp from generate_link uses type="email"
+      });
+      
+      console.log('🔍 [verifyOtp Route] verifyOtp (email) response:', {
+        hasData: !!verifyResult.data,
+        hasError: !!verifyResult.error,
+        errorMessage: verifyResult.error?.message,
+        errorCode: verifyResult.error?.code,
+        errorStatus: verifyResult.error?.status,
+        userId: verifyResult.data?.user?.id,
+        hasSession: !!verifyResult.data?.session,
+        timestamp: new Date().toISOString(),
       });
     } catch (verifyError) {
       console.error('❌ [verifyOtp Route] verifyOtp call threw exception:', {
@@ -218,17 +278,17 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // If 'magiclink' type fails with specific error, try 'email' as fallback
-    // This handles edge cases where OTP might have been sent via signInWithOtp
-    const shouldRetryWithEmail = verifyResult.error && 
+    // If 'email' type fails with specific error, try 'magiclink' as fallback
+    // This handles edge cases where the token might be a magic link token instead
+    const shouldRetryWithMagiclink = verifyResult.error && 
       verifyResult.error.code !== 'otp_expired' &&
       verifyResult.error.code !== 'expired_token' &&
       verifyResult.error.code !== 'token_expired' &&
       verifyResult.error.code !== 'invalid_token' &&
       verifyResult.error.code !== 'invalid_grant';
     
-    if (shouldRetryWithEmail) {
-      console.log('🔄 [verifyOtp Route] magiclink type failed with retryable error, trying email type...', {
+    if (shouldRetryWithMagiclink) {
+      console.log('🔄 [verifyOtp Route] email type failed with retryable error, trying magiclink type...', {
         errorMessage: verifyResult.error?.message,
         errorCode: verifyResult.error?.code,
         timestamp: new Date().toISOString(),
@@ -238,10 +298,21 @@ export async function POST(request: NextRequest) {
         verifyResult = await supabase.auth.verifyOtp({
           email: normalizedEmail,
           token: normalizedToken,
-          type: 'email', // Fallback to email type
+          type: 'magiclink', // Fallback to magiclink type
+        });
+        
+        console.log('🔍 [verifyOtp Route] verifyOtp (magiclink fallback) response:', {
+          hasData: !!verifyResult.data,
+          hasError: !!verifyResult.error,
+          errorMessage: verifyResult.error?.message,
+          errorCode: verifyResult.error?.code,
+          errorStatus: verifyResult.error?.status,
+          userId: verifyResult.data?.user?.id,
+          hasSession: !!verifyResult.data?.session,
+          timestamp: new Date().toISOString(),
         });
       } catch (verifyError) {
-        console.error('❌ [verifyOtp Route] verifyOtp (email fallback) call threw exception:', {
+        console.error('❌ [verifyOtp Route] verifyOtp (magiclink fallback) call threw exception:', {
           error: verifyError instanceof Error ? verifyError.message : String(verifyError),
           errorStack: verifyError instanceof Error ? verifyError.stack : undefined,
           email: normalizedEmail,
@@ -258,7 +329,7 @@ export async function POST(request: NextRequest) {
         );
       }
     } else if (verifyResult.error) {
-      console.log('⏭️ [verifyOtp Route] Skipping email type retry - token is expired or invalid:', {
+      console.log('⏭️ [verifyOtp Route] Skipping magiclink type retry - token is expired or invalid:', {
         errorMessage: verifyResult.error?.message,
         errorCode: verifyResult.error?.code,
         timestamp: new Date().toISOString(),
@@ -273,7 +344,7 @@ export async function POST(request: NextRequest) {
       errorStatus: verifyResult.error?.status,
       userId: verifyResult.data?.user?.id,
       hasSession: !!verifyResult.data?.session,
-      typeUsed: verifyResult.error ? 'magiclink -> email (fallback)' : 'magiclink',
+      typeUsed: verifyResult.error ? 'email -> magiclink (fallback)' : 'email',
       timestamp: new Date().toISOString(),
     });
     
@@ -287,7 +358,7 @@ export async function POST(request: NextRequest) {
         email: normalizedEmail,
         tokenLength: normalizedToken.length,
         tokenPrefix: normalizedToken.substring(0, 2) + '****',
-        typeUsed: verifyResult.error ? 'magiclink -> email (fallback)' : 'magiclink',
+        typeUsed: verifyResult.error ? 'email -> magiclink (fallback)' : 'email',
         supabaseUrl: supabaseUrl.substring(0, 50) + '...',
         timestamp: new Date().toISOString(),
       });
@@ -675,21 +746,42 @@ export async function POST(request: NextRequest) {
     
     return response;
   } catch (error) {
-    console.error('❌ [verifyOtp Route] Unexpected error:', {
-      error: error instanceof Error ? error.message : String(error),
-      errorStack: error instanceof Error ? error.stack : undefined,
-      errorName: error instanceof Error ? error.name : undefined,
+    // Log full error details for debugging
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    const errorName = error instanceof Error ? error.name : undefined;
+    
+    console.error('❌ [verifyOtp Route] ===== UNEXPECTED ERROR =====', {
+      errorMessage,
+      errorStack,
+      errorName,
+      errorType: error?.constructor?.name || typeof error,
+      errorString: String(error),
+      errorJSON: error instanceof Error ? {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      } : error,
       timestamp: new Date().toISOString(),
     });
     
     // Return detailed error for debugging
+    // Ensure error message is safe to serialize
+    const safeErrorMessage = errorMessage || 'An unexpected error occurred during OTP verification';
+    
     return NextResponse.json(
       { 
-        message: 'An unexpected error occurred during OTP verification',
-        error: error instanceof Error ? error.message : String(error),
+        message: safeErrorMessage,
+        error: safeErrorMessage,
         errorCode: 'UNEXPECTED_ERROR',
+        errorName: errorName || 'Unknown',
       },
-      { status: 500 }
+      { 
+        status: 500,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
     );
   }
 }
