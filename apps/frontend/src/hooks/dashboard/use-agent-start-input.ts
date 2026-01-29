@@ -222,7 +222,10 @@ export function useAgentStartInput(options: UseAgentStartInputOptions = {}): Use
     // Check auth if required
     // Global auth check: Only check if AuthProvider has finished loading to avoid false positives
     // This prevents redirect loops in incognito mode
-    if (requireAuth) {
+    // 🚨 TEMPORARY: Skip auth check when auth is disabled
+    // TODO: Remove this when authentication is fixed
+    const disableAuth = true; // Set to false to re-enable auth checks
+    if (requireAuth && !disableAuth) {
       console.log(`${logPrefix} Auth check (requireAuth=true):`, {
         isLoading: isAuthLoading,
         hasUser: !!user,
@@ -255,6 +258,11 @@ export function useAgentStartInput(options: UseAgentStartInputOptions = {}): Use
           timestamp: new Date().toISOString(),
         });
       }
+    } else if (disableAuth) {
+      console.log(`${logPrefix} Auth disabled - skipping auth check`, {
+        requireAuth,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     setIsSubmitting(true);

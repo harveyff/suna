@@ -273,7 +273,7 @@ export function DashboardContent() {
     handleSubmit,
   } = useAgentStartInput({
     redirectOnError: '/dashboard',
-    requireAuth: true,
+    requireAuth: false, // 🚨 TEMPORARY: Disabled auth requirement
     enableAutoSubmit: true,
     logPrefix: '[Dashboard]',
   });

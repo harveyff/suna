@@ -79,7 +79,10 @@ export default function MilanoPage() {
     const fileIds = chatInputRef.current?.getUploadedFileIds() || [];
     
     if ((!message.trim() && !fileIds.length) || isSubmitting || isOptimisticStarting) return;
-    if (!user && !isLoading) {
+    // 🚨 TEMPORARY: Skip auth check when auth is disabled
+    // TODO: Remove this when authentication is fixed
+    const disableAuth = true; // Set to false to re-enable auth checks
+    if (!disableAuth && !user && !isLoading) {
       router.push('/auth');
       return;
     }

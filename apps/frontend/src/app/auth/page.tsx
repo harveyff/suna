@@ -97,6 +97,17 @@ function LoginContent() {
 
   const { wasLastMethod: wasEmailLastMethod, markAsUsed: markEmailAsUsed } = useAuthMethodTracking('email');
 
+  // 🚨 TEMPORARY: Redirect to dashboard immediately when auth is disabled
+  // TODO: Remove this when authentication is fixed
+  useEffect(() => {
+    const disableAuth = true; // Set to false to re-enable auth page
+    if (disableAuth) {
+      console.log('🚨 [Auth Page] Redirecting to dashboard (auth disabled)');
+      router.replace('/dashboard');
+      return;
+    }
+  }, [router]);
+  
   // Note: We don't redirect authenticated users here because middleware handles it server-side
   // Client-side redirect here can cause redirect loops when middleware already redirected
   // If user reaches this page, they should see the auth form (middleware will redirect if authenticated)

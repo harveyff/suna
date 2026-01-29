@@ -269,33 +269,45 @@ export default function DashboardLayoutContent({
     return now < start && now < end;
   })();
 
-  if (isLoading) {
-    console.log('⏳ [Dashboard] Rendering skeleton (loading):', {
-      isLoading: true,
-      timestamp: new Date().toISOString(),
-    });
-    return <DashboardSkeleton />;
-  }
+  // 🚨 TEMPORARY: Skip loading checks when auth is disabled
+  // TODO: Remove this when authentication is fixed
+  const disableAuth = true; // Set to false to re-enable auth checks
+  if (!disableAuth) {
+    if (isLoading) {
+      console.log('⏳ [Dashboard] Rendering skeleton (loading):', {
+        isLoading: true,
+        timestamp: new Date().toISOString(),
+      });
+      return <DashboardSkeleton />;
+    }
 
-  if (!user) {
-    const hasAuthCookie = typeof document !== 'undefined' && (
-      document.cookie.includes('sb-supabase-kong-auth-token') ||
-      document.cookie.includes('sb-2f5c36de-auth-token') ||
-      document.cookie.includes('sb-demo-auth-token')
-    );
-    
-    console.log('⏳ [Dashboard] Rendering skeleton (no user):', {
-      isLoading: false,
-      hasUser: false,
-      hasAuthCookie,
+    if (!user) {
+      const hasAuthCookie = typeof document !== 'undefined' && (
+        document.cookie.includes('sb-supabase-kong-auth-token') ||
+        document.cookie.includes('sb-2f5c36de-auth-token') ||
+        document.cookie.includes('sb-demo-auth-token')
+      );
+      
+      console.log('⏳ [Dashboard] Rendering skeleton (no user):', {
+        isLoading: false,
+        hasUser: false,
+        hasAuthCookie,
+        timestamp: new Date().toISOString(),
+      });
+      return <DashboardSkeleton />;
+    }
+  } else {
+    console.log('🚨 [Dashboard] Auth disabled - skipping loading checks:', {
+      isLoading,
+      hasUser: !!user,
       timestamp: new Date().toISOString(),
     });
-    return <DashboardSkeleton />;
   }
   
   console.log('✅ [Dashboard] Rendering dashboard content:', {
-    userId: user.id,
-    email: user.email,
+    userId: user?.id || 'N/A',
+    email: user?.email || 'N/A',
+    hasUser: !!user,
     timestamp: new Date().toISOString(),
   });
 
