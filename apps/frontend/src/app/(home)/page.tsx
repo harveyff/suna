@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, lazy, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { BackgroundAALChecker } from '@/components/auth/background-aal-checker';
 import { HeroSection as NewHeroSection } from '@/components/home/hero-section';
 
@@ -10,6 +11,19 @@ const MobileAppInterstitial = lazy(() =>
 );
 
 export default function Home() {
+  const router = useRouter();
+  
+  // 🚨 TEMPORARY: Redirect to dashboard immediately
+  // TODO: Remove this when authentication is fixed
+  useEffect(() => {
+    const disableAuth = true; // Set to false to re-enable home page
+    if (disableAuth) {
+      console.log('🚨 [Home] Redirecting to dashboard (auth disabled)');
+      router.replace('/dashboard');
+      return;
+    }
+  }, [router]);
+  
   // Prevent body scroll on home page only
   useEffect(() => {
     document.body.style.overflow = 'hidden';

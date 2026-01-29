@@ -81,6 +81,16 @@ export async function middleware(request: NextRequest) {
   // TODO: Remove this when authentication is fixed
   const disableAuth = true; // Set to false to re-enable authentication
   if (disableAuth) {
+    // Redirect root path and auth page to dashboard
+    if (pathname === '/' || pathname === '' || pathname === '/auth') {
+      console.log('🚨 [Middleware] Redirecting to dashboard (auth disabled):', {
+        pathname,
+        timestamp: new Date().toISOString(),
+      });
+      const dashboardUrl = new URL('/dashboard', request.url);
+      return NextResponse.redirect(dashboardUrl);
+    }
+    
     console.log('🚨 [Middleware] Authentication DISABLED - allowing all requests:', {
       pathname,
       method: request.method,
